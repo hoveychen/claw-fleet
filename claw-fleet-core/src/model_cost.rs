@@ -123,6 +123,18 @@ pub const COST_TIER_10_50_READ_0_25: ModelCosts = ModelCosts {
     ..COST_TIER_10_50
 };
 
+// Fable 5.2 / Mythos 5.2: $8 / $40 per Mtok, a 20% cut from 5.1. Cache reads
+// stay at 0.025× input ($0.20); writes keep the 1.25× / 2× TTL multipliers
+// (Anthropic pricing page, checked 2026-11-10).
+pub const COST_TIER_8_40_READ_0_20: ModelCosts = ModelCosts {
+    input: 8.0,
+    output: 40.0,
+    cache_write: 10.0,
+    cache_write_1h: 16.0,
+    cache_read: 0.20,
+    web_search: 0.01,
+};
+
 // Haiku 3.5: $0.80 / $4 per Mtok.
 pub const COST_HAIKU_35: ModelCosts = ModelCosts {
     input: 0.80,
@@ -355,13 +367,16 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
         return COST_GPT_SOL;
     }
 
-    // Fable 5.1 / Mythos 5.1 keep the $10/$50 rates but read cache at $0.25.
-    // Minor parsed like `opus-5-` below, so a dated `claude-fable-5-20260601`
-    // (where `-2` is a year) stays on the 5.0 tier.
-    if single_digit_minor(&m, "fable-5-") == Some(1)
-        || single_digit_minor(&m, "mythos-5-") == Some(1)
-    {
-        return COST_TIER_10_50_READ_0_25;
+    // Fable / Mythos 5.x minors. Parsed like `opus-5-` below, so a dated
+    // `claude-fable-5-20260601` (where `-2` is a year, not minor 2) stays on
+    // the 5.0 tier. 5.1 keeps the $10/$50 rates but reads cache at $0.25;
+    // 5.2 drops to $8/$40.
+    let fable_minor =
+        single_digit_minor(&m, "fable-5-").or_else(|| single_digit_minor(&m, "mythos-5-"));
+    match fable_minor {
+        Some(2) => return COST_TIER_8_40_READ_0_20,
+        Some(1) => return COST_TIER_10_50_READ_0_25,
+        _ => {}
     }
 
     // Fable 5 and Mythos 5 share the $10/$50 tier. Substring match tolerates
@@ -780,6 +795,39 @@ mod tests {
             let cost = turn_cost_usd(model, &reads);
             assert!((cost - 1.0).abs() < 1e-9, "{model} -> {cost}, want 1.0");
         }
+    }
+
+    #[test]
+    fn fable_and_mythos_5_2_use_the_8_40_tier() {
+        // $8 in + $40 out + $10 (5m write) + $16 (1h write) + $0.20 (read)
+        // per 1M of each = $74.20. `cache_creation_1h_tokens` is a subset of
+        // `cache_creation_tokens`, so 2M written = 1M at 5m + 1M at 1h.
+        let usage = TurnUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            cache_creation_tokens: 2_000_000,
+            cache_creation_1h_tokens: 1_000_000,
+            cache_read_tokens: 1_000_000,
+            ..Default::default()
+        };
+        for model in [
+            "claude-fable-5-2",
+            "claude-fable-5-2[1m]",
+            "claude-fable-5-2-20261101",
+            "Claude-Fable-5-2",
+            "claude-mythos-5-2",
+        ] {
+            let cost = turn_cost_usd(model, &usage);
+            assert!((cost - 74.2).abs() < 1e-9, "{model} -> {cost}, want 74.2");
+        }
+        // A dated 5.0 id whose year starts with `2` must not read as minor 2.
+        let io = TurnUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            ..Default::default()
+        };
+        let cost = turn_cost_usd("claude-fable-5-20260601", &io);
+        assert!((cost - 60.0).abs() < 1e-9, "dated 5.0 -> {cost}, want 60.0");
     }
 
     #[test]

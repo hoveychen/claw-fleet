@@ -3550,6 +3550,7 @@ mod tests {
         for model in [
             "claude-fable-5",
             "claude-fable-5-1",
+            "claude-fable-5-2",
             "fable",
             "claude-mythos-5",
             "claude-mythos-preview",

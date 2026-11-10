@@ -138,6 +138,10 @@ mod tests {
             // Claude family model IDs
             assert!(g.contains("claude-opus-5"), "{locale} must list Opus 5");
             assert!(
+                g.contains("claude-fable-5-2"),
+                "{locale} must list Fable 5.2"
+            );
+            assert!(
                 g.contains("claude-fable-5-1"),
                 "{locale} must list Fable 5.1"
             );

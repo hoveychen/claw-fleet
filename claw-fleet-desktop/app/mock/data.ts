@@ -3346,6 +3346,7 @@ export const MOCK_MODEL_CATALOG = withCliFlags([
     cliVersion: "2.1.284",
     upgradeCommand: "claude update",
     models: [
+      m("claude-fable-5-2", "Fable 5.2", "claude", "premium", CLAUDE_LADDER, null, "2.1.321"),
       m("claude-fable-5-1", "Fable 5.1", "claude", "premium", CLAUDE_LADDER, null, "2.1.257"),
       m("claude-opus-5-5", "Opus 5.5", "claude", "premium", CLAUDE_LADDER, null, "2.1.280"),
       m("claude-opus-5", "Opus 5", "claude", "premium", CLAUDE_LADDER, null, "2.1.219"),
