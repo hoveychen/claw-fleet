@@ -203,6 +203,8 @@ impl LocalBackend {
             });
         }
 
+        install_relay_event_bridge(&app, sessions.clone());
+
         let watch = Arc::new(crate::WatchState::new());
         let waiting_alerts: Arc<Mutex<HashMap<String, WaitingAlert>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -1582,6 +1584,33 @@ fn emit_sessions(app: &AppHandle, sessions: &[SessionInfo]) -> Vec<Value> {
         let _ = app.emit(SESSIONS_FRAME_EVENT, &frame);
     }
     rows
+}
+
+/// Feed a desktop tab on the relay (see `claw_fleet_core::relay_events`) from
+/// this webview's own events, so it renders from exactly what the desktop UI
+/// renders from. Every emit site — rescans, the liveness ticker, the decision
+/// pollers — is covered by listening rather than by touching each one.
+///
+/// `/sessions_snapshot` over the relay is answered from [`SESSIONS_TRACKER`]
+/// too (the same thing [`LocalBackend::sessions_snapshot`] does), not from the
+/// embedded request server: that server numbers its own frames, and a resync
+/// from it would never line up with the deltas forwarded here.
+fn install_relay_event_bridge(app: &AppHandle, sessions: Arc<Mutex<Vec<SessionInfo>>>) {
+    use tauri::Listener;
+    for &name in claw_fleet_core::relay_events::FORWARDED_EVENTS {
+        app.listen_any(name, move |event| {
+            claw_fleet_core::relay_events::publish(name, event.payload());
+        });
+    }
+    let app = app.clone();
+    claw_fleet_core::relay_events::set_sessions_snapshot_provider(move || {
+        let rows = session_rows(&sessions.lock().unwrap());
+        let mut tracker = SESSIONS_TRACKER.lock().unwrap();
+        if let Some(frame) = tracker.frame(&rows) {
+            let _ = app.emit(SESSIONS_FRAME_EVENT, &frame);
+        }
+        tracker.snapshot()
+    });
 }
 
 /// Mirror a sessions snapshot onto the mobile relay channel, from the rows

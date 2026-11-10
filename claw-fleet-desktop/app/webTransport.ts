@@ -23,6 +23,7 @@ import {
   setProbeBase,
   setHostPrefsSource,
   liveProxyReport,
+  type LiveEventStream,
 } from "./mock/liveProxy";
 // Statically, not lazily: the hidden `<input>`'s click has to land inside the
 // user-activation window opened by the button press, and a lazy chunk fetch
@@ -352,8 +353,9 @@ export interface WebTransportOptions {
   /** Prefix the data routes sit under on this origin. `""` (default) for
    *  `fleet webui`; the tunnel prefix when served from a relay. */
   probeBase?: string;
-  /** `false` when the transport cannot carry `/events` (the relay tunnel). */
-  eventStream?: boolean;
+  /** `false` when the transport cannot carry `/events`; a `LiveEventStream`
+   *  when it carries the same events its own way (the relay socket). */
+  eventStream?: boolean | LiveEventStream;
 }
 
 export async function installWebTransport(opts: WebTransportOptions = {}): Promise<void> {

@@ -51,6 +51,8 @@ DESKTOP_GUARD_TESTS=(
   app/capabilityCoverage.test.ts
   app/tauriCoreProbe.wiring.test.ts
   app/mock/liveProxy.test.ts
+  # Event names the relay pushes (core relay_events.rs) vs what liveProxy consumes.
+  app/relay/relayEvents.test.ts
 )
 MOBILE_GUARD_TESTS=(
   src/i18nKeys.test.ts
