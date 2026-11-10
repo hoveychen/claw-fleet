@@ -13,39 +13,11 @@
 // startup; now the relay specified by QR code is saved to the device record (devices.ts) the moment
 // it arrives, so there's nothing that needs to be read before the fragment is wiped.
 
-/** Parse `&relay=<encoded origin>` from the QR code fragment into an origin.
- *
- *  Only accepts absolute http/https URLs — the QR code is untrusted input, and this value
- *  becomes the base for all subsequent URLs on the client. Extract origin (discard path,
- *  normalize trailing slash): relay with path prefix is not supported on this client anyway
- *  (PWA base comes from window.location.origin, which also discards the prefix).
- *
- *  Only the Harmony shell writes this parameter (WebShell.ets → RelayStore): its page origin
- *  is fake (`https://fleet.local`), and without this parameter it can only use the relay
- *  baked in at build time; self-hosted relay would never pair without it. */
-export function parseRelayParam(hash: string): string | null {
-  const match = hash.match(/[#&]relay=([^&]+)/);
-  if (!match) return null;
-  try {
-    return relayOriginOf(decodeURIComponent(match[1]));
-  } catch {
-    return null;
-  }
-}
+import { parseRelayParam } from "../../shared-ts/pairingLink";
 
-/** Normalise a relay address to its origin, or `null` when it is not an absolute
- *  http/https URL. Shared by the QR `&relay=` parameter and the custom address the
- *  user types on the "More" page — both become the base of every relay URL. */
-export function relayOriginOf(raw: string): string | null {
-  let candidate: URL;
-  try {
-    candidate = new URL(raw.trim());
-  } catch {
-    return null;
-  }
-  if (candidate.protocol !== "https:" && candidate.protocol !== "http:") return null;
-  return candidate.origin;
-}
+// Fragment/origin parsing is shared with the desktop bundle (shared-ts/pairingLink.ts).
+export { parseRelayParam, relayOriginOf } from "../../shared-ts/pairingLink";
+
 
 /** The relay designated by a complete pairing link. For **native shells**: they receive
  *  the full URL from App Link / Universal Link, not `window.location.hash`.

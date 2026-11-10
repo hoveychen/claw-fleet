@@ -3,9 +3,12 @@
  *
  * The relay origin also serves mobile-web at its root, and mobile-web keeps
  * the phone's paired Macs in localStorage under `fleet-devices` — same origin,
- * so this page reads that book instead of running a pairing flow of its own.
- * One relay pairing → use it. Several → let the user pick (remembered). None
- * → point at mobile-web's pairing page and stop.
+ * so this page shares that book (format and operations in
+ * `shared-ts/deviceBook.ts`). Opened with a pairing fragment (`#k=<secret>`,
+ * the desktop's "open on a computer" link) it adds that Mac to the book
+ * first, exactly as mobile-web would. Then: one relay pairing → use it.
+ * Several → let the user pick (remembered). None → point at mobile-web's
+ * pairing page and stop.
  *
  * Once a device is chosen this wires the HTTP-over-relay tunnel
  * (`tunnel.ts`): page `fetch` goes straight over the socket, browser-initiated
@@ -13,12 +16,22 @@
  * at the tunnel prefix.
  */
 
+import {
+  DEVICE_BOOK_KEY as SHARED_BOOK_KEY,
+  addDevice,
+  emptyBook,
+  nextDeviceLabel,
+  parseBook,
+  persistBook,
+  type DeviceBook,
+} from "../../../shared-ts/deviceBook";
+import { parseHashPairing } from "../../../shared-ts/pairingLink";
 import { setWebApiPrefix } from "../hostEnv";
 import { RelaySocket, type RelaySocketStatus } from "./relaySocket";
 import { attachSwBridge, installTunnelFetch, tunnelPrefix } from "./tunnel";
 
 /** mobile-web's device book key (`mobile-web/src/devices.ts`). */
-export const DEVICE_BOOK_KEY = "fleet-devices";
+export const DEVICE_BOOK_KEY = SHARED_BOOK_KEY;
 /** Which paired Mac this browser last chose for the desktop view. */
 export const CHOSEN_DEVICE_KEY = "fleet-web:relay-device";
 
@@ -31,36 +44,74 @@ export interface RelayDeviceEntry {
 }
 
 /**
- * The relay pairings in mobile-web's book. Same leniency as its `parseBook`:
- * a record without `kind` predates multi-transport days and is a relay record
- * when it has a secret; `http` records (direct hosts) are not reachable over
- * the relay and are skipped; a malformed record is dropped alone.
+ * The relay pairings in mobile-web's book, parsed by the same `parseBook`
+ * mobile-web uses: a record without `kind` predates multi-transport days and
+ * is a relay record when it has a secret; `http` records (direct hosts) are
+ * not reachable over the relay and are skipped; a malformed record is dropped
+ * alone.
  */
 export function relayDevicesFromBook(raw: string | null): RelayDeviceEntry[] {
-  if (!raw) return [];
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  const list = (value as { devices?: unknown } | null)?.devices;
-  if (!Array.isArray(list)) return [];
+  const book = parseBook(raw);
+  if (!book) return [];
   const out: RelayDeviceEntry[] = [];
-  for (const item of list) {
-    if (typeof item !== "object" || item === null) continue;
-    const d = item as Record<string, unknown>;
-    if (d.kind === "http") continue;
-    if (typeof d.id !== "string" || !d.id) continue;
-    if (typeof d.secret !== "string" || !d.secret) continue;
+  for (const d of book.devices) {
+    if (d.kind !== "relay") continue;
     out.push({
       id: d.id,
-      label: typeof d.label === "string" && d.label ? d.label : d.id.slice(0, 8),
+      label: d.label || d.id.slice(0, 8),
       secret: d.secret,
-      relayBase: typeof d.relayBase === "string" && d.relayBase ? d.relayBase : null,
+      relayBase: d.relayBase || null,
     });
   }
   return out;
+}
+
+export interface PairingIntakeEnv {
+  /** `window.location.hash`. */
+  hash: string;
+  /** Current book JSON (`localStorage[fleet-devices]`), or null. */
+  readBook: () => string | null;
+  /** Persist the updated book (production: shared `persistBook`, which mirrors to IDB). */
+  writeBook: (book: DeviceBook) => void;
+  /** Remove the fragment from the address bar. */
+  scrub: () => void;
+  /** Fresh id for a newly added device. */
+  newId: () => string;
+  /** Default-name prefix (mobile-web uses its localized "设备"/"Device"). */
+  labelPrefix: string;
+  now: number;
+}
+
+/**
+ * Take a `#k=<secret>` pairing fragment into the shared device book, the way
+ * mobile-web's `consumeHashPairing` + `adoptScannedDevice` do: the fragment is
+ * scrubbed before anything else (the secret must not linger in the address
+ * bar or history), a secret already in the book is the same Mac (no second
+ * entry; its label survives), and the adopted device becomes active. Returns
+ * the device id, or `null` when the fragment carries no pairing.
+ */
+export function adoptPairingFromHash(env: PairingIntakeEnv): string | null {
+  const pairing = parseHashPairing(env.hash);
+  if (!pairing) return null;
+  env.scrub();
+  const book = parseBook(env.readBook()) ?? emptyBook();
+  const { book: next, device } = addDevice(book, {
+    secret: pairing.secret,
+    relayBase: pairing.relayBase,
+    id: env.newId(),
+    label: nextDeviceLabel(book, env.labelPrefix),
+    now: env.now,
+  });
+  env.writeBook(next);
+  return device.id;
+}
+
+function randomId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
 }
 
 /** The device to use without asking, or `null` when the user must choose. */
@@ -208,6 +259,30 @@ export interface RelayBoot {
 export async function bootRelayTransport(mount: string): Promise<RelayBoot | null> {
   let raw: string | null = null;
   let chosenId: string | null = null;
+  const adoptedId = adoptPairingFromHash({
+    hash: window.location.hash,
+    readBook: () => {
+      try {
+        return window.localStorage.getItem(DEVICE_BOOK_KEY);
+      } catch {
+        return null;
+      }
+    },
+    writeBook: persistBook,
+    scrub: () =>
+      history.replaceState(null, "", window.location.pathname + window.location.search),
+    newId: randomId,
+    labelPrefix: /^zh/i.test(navigator.language || "") ? "设备" : "Device",
+    now: Date.now(),
+  });
+  if (adoptedId) {
+    try {
+      // The link names one Mac: connect to it, even when others are paired.
+      window.localStorage.setItem(CHOSEN_DEVICE_KEY, adoptedId);
+    } catch {
+      /* not remembered; the picker asks */
+    }
+  }
   try {
     raw = window.localStorage.getItem(DEVICE_BOOK_KEY);
     chosenId = window.localStorage.getItem(CHOSEN_DEVICE_KEY);
