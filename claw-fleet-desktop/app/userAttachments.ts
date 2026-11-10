@@ -11,7 +11,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { isWebBuild } from "./hostEnv";
+import { isWebBuild, webApiOrigin } from "./hostEnv";
 import type { ChatComposerAttachment, ChatComposerStagedAttachment } from "./components/ChatComposer";
 
 /**
@@ -103,7 +103,7 @@ export function userAttachmentUrl(path: string): string | null {
     // and 404. Every attachment whose name has a space, silently blank.
     const key = encodeURIComponent(seg[0]);
     const name = encodeURIComponent(seg[1]);
-    return `${window.location.origin}/user_attachment?key=${key}&name=${name}`;
+    return `${webApiOrigin()}/user_attachment?key=${key}&name=${name}`;
   }
   const joined = seg.map(encodeURIComponent).join("/");
   return navigator.userAgent.includes("Windows")

@@ -2275,9 +2275,13 @@ const SESSIONS_POLL_QUIET_MS = 10_000;
  * answers 204 while nothing changed — so a quiet board costs a status line
  * every 3s, not the whole list.
  */
+/** Set when `/events` is not used at all: then the poll is the only channel,
+ *  and its own frames must not count as "SSE is delivering, stay quiet". */
+let pollOnly = false;
+
 function startSessionsPoll() {
   window.setInterval(async () => {
-    if (Date.now() - lastFrameAt < SESSIONS_POLL_QUIET_MS) return;
+    if (!pollOnly && Date.now() - lastFrameAt < SESSIONS_POLL_QUIET_MS) return;
     try {
       const frame = await callProbe({
         method: "GET",
@@ -2483,11 +2487,20 @@ function startEventStream() {
   }
 }
 
-export function installLiveProxy() {
+/**
+ * `eventStream: false` skips `/events` entirely — for transports that cannot
+ * carry a long-lived stream (the relay tunnel answers one request with one
+ * reply). The board then rides the sessions poll from its first tick and cards
+ * the decision reconcile poll, instead of retrying an EventSource that can
+ * never open.
+ */
+export function installLiveProxy(opts: { eventStream?: boolean } = {}) {
   if (document.body) installLogNode();
   else window.addEventListener("DOMContentLoaded", installLogNode);
   logLine(`live proxy armed → ${LIVE_BASE}`);
+  pollOnly = opts.eventStream === false;
   startSessionsPoll();
-  startEventStream();
+  if (pollOnly) logLine("SSE disabled for this transport — polling only");
+  else startEventStream();
   (window as unknown as Record<string, unknown>).__liveProxyReport = liveProxyReport;
 }

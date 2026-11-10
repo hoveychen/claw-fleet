@@ -348,7 +348,15 @@ export function webTransportGaps(): string[] {
   return [...gaps].sort();
 }
 
-export async function installWebTransport(): Promise<void> {
+export interface WebTransportOptions {
+  /** Prefix the data routes sit under on this origin. `""` (default) for
+   *  `fleet webui`; the tunnel prefix when served from a relay. */
+  probeBase?: string;
+  /** `false` when the transport cannot carry `/events` (the relay tunnel). */
+  eventStream?: boolean;
+}
+
+export async function installWebTransport(opts: WebTransportOptions = {}): Promise<void> {
   const { mockIPC, mockWindows } = await import("@tauri-apps/api/mocks");
 
   // Sets up `__TAURI_INTERNALS__.metadata`, which the event and window APIs
@@ -356,8 +364,9 @@ export async function installWebTransport(): Promise<void> {
   mockWindows("main");
 
   // Same origin: this page was served by the very process that answers the
-  // data routes, so no proxy prefix.
-  setProbeBase("");
+  // data routes, so no proxy prefix — unless the relay transport put the
+  // routes behind its tunnel prefix (`relay/relayBoot.ts`).
+  setProbeBase(opts.probeBase ?? "");
 
   // The guidance routes (`/apply_interaction_mode`, `/apply_prd_mode`, …) need
   // the user's title and locale in their body. On the desktop those live in
@@ -419,7 +428,7 @@ export async function installWebTransport(): Promise<void> {
 
   // Installs the board poller. The desktop pushes `sessions-updated` over an
   // app event; over HTTP the page has to ask.
-  installLiveProxy();
+  installLiveProxy({ eventStream: opts.eventStream });
 
   (window as unknown as Record<string, unknown>).__webTransportGaps = webTransportGaps;
   (window as unknown as Record<string, unknown>).__liveProxyReport = liveProxyReport;
