@@ -171,6 +171,26 @@ describe("classifySyntheticError", () => {
     }
   });
 
+  it("reads media_removed as a dropped image, not an over-long prompt", () => {
+    const info = classifySyntheticError({
+      type: "assistant",
+      isApiErrorMessage: true,
+      error: "invalid_request",
+      apiError: "media_removed",
+      message: {
+        model: "<synthetic>",
+        content: [
+          {
+            type: "text",
+            text: "API Error: an image in the conversation could not be processed and was removed. Re-read the file with a different approach if you still need it.",
+          },
+        ],
+      },
+    });
+    expect(info?.titleKey).toBe("detail.api_error.media_removed");
+    expect(info?.actions).toEqual(["retry"]);
+  });
+
   it("still offers compaction for an ordinary over-long prompt", () => {
     const info = classifySyntheticError({
       ...COMPACTION_BLOCKED,

@@ -2066,6 +2066,7 @@
       "model_quota": "Out of quota for this model",
       "server": "Can't reach the API",
       "network_blocked": "Network blocked",
+      "media_removed": "Image could not be processed",
       "too_long": "Context too long",
       "compaction_blocked": "Compaction was blocked by the same limit",
       "billing": "Credit balance too low",
