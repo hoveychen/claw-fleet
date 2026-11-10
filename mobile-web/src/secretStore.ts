@@ -5,42 +5,16 @@
 // in some cleanup paths) and re-hydrate from whichever copy survived. The
 // real durability fix is installing as a PWA — see the A2HS hint in App.
 
+import { DEVICE_DB_STORE, openDeviceDb as openDb } from "../../shared-ts/deviceBook";
+import { extractSecretFromUrl } from "../../shared-ts/pairingLink";
+
 const LS_KEY = "fleet-relay-secret";
-const DB_NAME = "fleet-relay";
-const STORE = "kv";
+const STORE = DEVICE_DB_STORE;
 
-/** Shared by sessionCache.ts, which stores the sessions snapshot under a
- *  different key in this same DB/store (no schema change). */
-export function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE)) {
-        req.result.createObjectStore(STORE);
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-/** Pull the pairing secret out of a URL (or a bare `#…` fragment).
- *
- *  Deliberately **fragment-only**: a fragment is never sent to the server, and
- *  the relay is a blind forwarder that must never see the secret (see
- *  `claw-fleet-core/src/relay_crypto.rs`). Accepting `?k=` here would leak it
- *  to the relay every time the pairing link is opened in a browser instead of
- *  the app — so if a platform strips fragments from deep links, fix it on that
- *  platform rather than widening this to the query string.
- *
- *  Shared with `deepLink.ts`, which feeds it the URL a Universal Link / App
- *  Link handed to the native shell instead of `window.location`. */
-export function extractSecretFromUrl(url: string): string | null {
-  const hashAt = url.indexOf("#");
-  if (hashAt < 0) return null;
-  const match = url.slice(hashAt).match(/[#&]k=([A-Za-z0-9_-]+)/);
-  return match ? match[1] : null;
-}
+/** Shared by sessionCache.ts and devices.ts, which store other keys in this same
+ *  DB/store (no schema change). The opener lives in shared-ts with the book. */
+export { openDeviceDb as openDb } from "../../shared-ts/deviceBook";
+export { extractSecretFromUrl } from "../../shared-ts/pairingLink";
 
 /** Synchronous sources only: URL fragment (`#k=…`) wins, then localStorage.
  *  A fragment hit is persisted to both stores and scrubbed from the URL. */

@@ -225,6 +225,23 @@
   color: var(--color-text-secondary);
 }
 
+/* "Open on a computer" row: the masked link takes the free width and
+   truncates rather than pushing the copy button out. */
+.desktopLink {
+  margin-top: 4px;
+}
+
+.desktopLinkText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 .urlInput {
   flex: 1;
   background: var(--color-bg-field);

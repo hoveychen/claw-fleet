@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "./PageShell";
 import { SkeletonCard, SkeletonText, Skeleton, Spinner } from "./loading";
 import { useUIStore } from "../store";
 import { RELAY_PRESETS, relayChoiceOf, type RelayChoice } from "../../../shared-ts/relayPresets";
+import { desktopPairingLink } from "../../../shared-ts/pairingLink";
 import styles from "./MobileView.module.css";
 
 interface MobileRelayConfig {
@@ -66,12 +68,22 @@ function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => s
   return t("d_ago", { n: Math.floor(diff / 86_400_000) });
 }
 
+/** Show a pairing link without its secret: `#k=abcd…` → `#k=••••••`. */
+function maskSecret(link: string): string {
+  return link.replace(/([#&]k=)[^&]+/, "$1••••••").replace(/&lang=[^&]*/, "");
+}
+
 /** Mobile section — enable mobile relay channel and show pairing QR code. */
 export function MobileView() {
   const { t, i18n } = useTranslation();
   const [config, setConfig] = useState<MobileRelayConfig | null>(null);
   const [status, setStatus] = useState<MobileRelayStatus | null>(null);
   const [qrSvg, setQrSvg] = useState<string | null>(null);
+  // "Open on a computer" link: the phone pairing link with its path moved to the
+  // relay's `/desktop/` mount (shared-ts/pairingLink.ts). Derived from the same
+  // core-built URL the QR encodes, so secret and relay cannot drift apart.
+  const [desktopLink, setDesktopLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   // True while a QR render is in flight, so the panel shows a skeleton instead
   // of the grey "QR" box that also stands for "no code".
   const [qrLoading, setQrLoading] = useState(false);
@@ -96,17 +108,22 @@ export function MobileView() {
   const refreshQr = useCallback(async (enabled: boolean) => {
     if (!enabled) {
       setQrSvg(null);
+      setDesktopLink(null);
       return;
     }
     // Carry the desktop's current UI language into the QR so a fresh scan opens
     // the phone in the same language (core accepts only "zh"/"en").
     const lang = i18n.language.startsWith("zh") ? "zh" : "en";
     setQrLoading(true);
+    const linkTask = invoke<string>("mobile_relay_pairing_url", { lang })
+      .then((url) => setDesktopLink(desktopPairingLink(url)))
+      .catch(() => setDesktopLink(null));
     try {
       setQrSvg(await invoke<string>("mobile_relay_qr_svg", { lang }));
     } catch {
       setQrSvg(null);
     } finally {
+      await linkTask;
       setQrLoading(false);
     }
   }, [i18n]);
@@ -347,6 +364,42 @@ export function MobileView() {
             ) : (
               <div className={styles.qrWrap}>
                 <div className={styles.qrPlaceholder}>QR</div>
+              </div>
+            )}
+
+            {desktopLink && (
+              <div className={styles.desktopLink} data-testid="mobile-desktop-link">
+                <div className={styles.fieldRow}>
+                  <span className={styles.fieldLabel}>
+                    {t("mobile_desktop_link_label", "在电脑上打开")}
+                  </span>
+                  {/* The secret is masked on screen (the QR hint asks not to
+                      share screenshots); the copy button carries the full link. */}
+                  <code className={styles.desktopLinkText} title={maskSecret(desktopLink)}>
+                    {maskSecret(desktopLink)}
+                  </code>
+                  <button
+                    className={styles.smallButton}
+                    onClick={() => {
+                      writeText(desktopLink)
+                        .then(() => {
+                          setLinkCopied(true);
+                          window.setTimeout(() => setLinkCopied(false), 1500);
+                        })
+                        .catch((e) => setError(String(e)));
+                    }}
+                  >
+                    {linkCopied
+                      ? t("mobile_desktop_link_copied", "已复制")
+                      : t("mobile_desktop_link_copy", "复制链接")}
+                  </button>
+                </div>
+                <p className={styles.relayHint}>
+                  {t(
+                    "mobile_desktop_link_hint",
+                    "在另一台电脑的浏览器里打开这个链接，即可用桌面版界面访问这台 Mac，无需先在手机页配对。链接包含配对密钥，请勿外传。",
+                  )}
+                </p>
               </div>
             )}
 

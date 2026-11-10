@@ -379,6 +379,10 @@
   "mobile_relay_hint_shared": "两个预设指向同一个 relay，只是网络路径不同；已配对的手机需重新扫码才会走新地址。",
   "mobile_rotate": "重新生成配对密钥",
   "mobile_rotate_hint": "旧二维码与已配对的手机将立即失效。",
+  "mobile_desktop_link_label": "在电脑上打开",
+  "mobile_desktop_link_hint": "在另一台电脑的浏览器里打开这个链接，即可用桌面版界面访问这台 Mac，无需先在手机页配对。链接包含配对密钥，请勿外传。",
+  "mobile_desktop_link_copy": "复制链接",
+  "mobile_desktop_link_copied": "已复制",
   "incognito_badge": "隐身",
   "incognito_badge_title": "隐身会话——不进其他会话、搜索和日报",
   "new_session": {
