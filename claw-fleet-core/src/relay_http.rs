@@ -77,6 +77,12 @@ pub const HTTP_TUNNEL_ROUTES: &[(&str, &str)] = &[
     ("GET", crate::routes::MODEL_CATALOG),
     ("GET", crate::routes::DSH_MODELS),
     ("GET", crate::routes::CHAT_WORKSPACE),
+    // ── Library (read-only; the phone already browses it) ──────────────
+    ("GET", crate::routes::LIBRARY_TREE),
+    ("GET", crate::routes::LIBRARY_FOLDER_ITEMS),
+    ("GET", crate::routes::LIBRARY_SEARCH),
+    ("GET", crate::routes::LIBRARY_INGEST_BATCHES),
+    ("GET", crate::routes::LIBRARY_INGEST_BATCH),
     // ── Session list and transcripts ────────────────────────────────────
     ("GET", crate::routes::SESSIONS),
     ("GET", crate::routes::SESSIONS_SNAPSHOT),
