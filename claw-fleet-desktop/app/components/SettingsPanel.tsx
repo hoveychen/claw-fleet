@@ -2253,6 +2253,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   </>
                 )}
 
+                {/* Adding a host installs software on it: not offered over the relay. */}
+                {!relayReadOnly && (
+                <>
                 {/* Add a host: pick an ssh target, install rca. No workspace
                     path — that is the composer's job. */}
                 <div className={styles.section_title} style={{ marginTop: 12 }}>
@@ -2333,6 +2336,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       </span>
                     ))}
                   </div>
+                )}
+                </>
                 )}
                 {rwError && (
                   <p className={styles.hooks_error}>{rwError}</p>
