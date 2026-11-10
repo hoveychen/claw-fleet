@@ -10,7 +10,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { classifySyntheticError } from "../../../shared-ts/syntheticError";
+import { RETRY_LIVE_PROMPT, classifySyntheticError } from "../../../shared-ts/syntheticError";
 import { ApiErrorCard } from "./ApiErrorCard";
 import { runApiErrorAction, resumeOverRelay, type ActionEnv } from "./apiErrorActions";
 
@@ -56,6 +56,35 @@ describe("apiErrorActions", () => {
     // A prompt here would silently replace the interrupted work with a new
     // instruction instead of resuming it.
     expect(params).not.toHaveProperty("prompt");
+  });
+
+  it("retries a live session by sending into it, since a resume would be refused", async () => {
+    // A failed main-thread turn leaves `claude -p` running while a background
+    // subagent works; the drive lease then refuses every resume.
+    const request = vi.fn(async (_method: string, _params: Record<string, unknown>) => ({}));
+    const live = { ...env(request), session: { ...SESSION, live: true } };
+    expect(await runApiErrorAction("retry", live)).toEqual({ kind: "sentLive" });
+
+    const [method, params] = request.mock.calls[0];
+    expect(method).toBe("enqueue_message");
+    expect(params).toMatchObject({
+      sessionId: "s-1",
+      workspacePath: "/repo",
+      text: RETRY_LIVE_PROMPT,
+      idempotencyKey: "key-1",
+    });
+  });
+
+  it("hides resume-only actions on a live session", () => {
+    const html = renderToStaticMarkup(
+      <ApiErrorCard
+        info={info("invalid_request", "Prompt is too long")}
+        session={{ ...SESSION, live: true }}
+        client={{ request: vi.fn() } as unknown as ActionEnv["client"]}
+      />,
+    );
+    expect(html).not.toContain('data-action="compact"');
+    expect(html).toContain('data-action="retry"');
   });
 
   it("asks before resuming a session another one took over, and resends only on yes", async () => {

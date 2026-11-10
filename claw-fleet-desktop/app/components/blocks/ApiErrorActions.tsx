@@ -2,8 +2,13 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 
-import type { ErrorAction, SyntheticErrorInfo } from "../../../../shared-ts/syntheticError";
-import type { ProcRecord } from "../../types";
+import {
+  RETRY_LIVE_PROMPT,
+  actionsForLiveSession,
+  type ErrorAction,
+  type SyntheticErrorInfo,
+} from "../../../../shared-ts/syntheticError";
+import type { Delivery, ProcRecord } from "../../types";
 import { cliUpgradeFor, modelChoicesFor } from "../../modelChoices";
 import { useModelCatalogState } from "../../useModelCatalog";
 import { canResumeSession, resumeErrorText, resumeSession } from "../sessionResume";
@@ -21,6 +26,10 @@ export interface ApiErrorContext {
   workspacePath: string;
   agentSource: string;
   isSubagent?: boolean;
+  /** The session's process is still running (the composer's own
+   *  `canEnqueueSession` test). A failed main-thread turn leaves it alive while
+   *  a background subagent runs, and a resume is then refused. */
+  live?: boolean;
 }
 
 /**
@@ -89,6 +98,22 @@ export function ApiErrorActions({
       if (!ctx) return;
       switch (action) {
         case "retry":
+          if (ctx.live) {
+            // Process still alive: a resume would be refused by the drive
+            // lease, so hand the live process a "carry on" message — the same
+            // path the composer's enqueue mode takes.
+            setBusy("retry");
+            setError(null);
+            invoke<Delivery>("enqueue_session_message", {
+              sessionId: ctx.sessionId,
+              workspacePath: ctx.workspacePath,
+              text: RETRY_LIVE_PROMPT,
+            })
+              .then(() => setDone("retry"))
+              .catch((e: unknown) => setError(resumeErrorText(e)))
+              .finally(() => setBusy(null));
+            return;
+          }
           // No prompt: the resumed agent picks up the turn the failure cut off,
           // which is the same thing the rate-limit control and the auto-resume
           // scheduler do.
@@ -133,8 +158,11 @@ export function ApiErrorActions({
   // A button that cannot work must not be drawn. `openUrl` and `login` stand on
   // their own; everything else routes through a resume, so they disappear for a
   // subagent / IDE-attached / non-resumable session rather than failing on click.
+  // A live process cannot be resumed with new launch settings either.
   const shown = ctx
-    ? info.actions.filter((a) => resumable || a === "openUrl" || a === "login")
+    ? (ctx.live ? actionsForLiveSession(info.actions) : info.actions).filter(
+        (a) => resumable || a === "openUrl" || a === "login",
+      )
     : [];
   const view: SyntheticErrorInfo = shown.length === info.actions.length ? info : { ...info, actions: shown };
 
@@ -211,7 +239,9 @@ export function ApiErrorActions({
       )}
       {done && !error && (
         <div className={styles.note} data-testid="api-error-done">
-          {t("detail.api_error.resumed", "已重新拉起，等会话接上…")}
+          {done === "retry" && ctx?.live
+            ? t("detail.api_error.sent_live", "已把「继续」送进正在运行的任务…")
+            : t("detail.api_error.resumed", "已重新拉起，等会话接上…")}
         </div>
       )}
     </>

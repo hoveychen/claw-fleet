@@ -69,6 +69,22 @@ export type ErrorAction =
   /** Open an external page (billing / usage / status). `url` says which. */
   | "openUrl";
 
+/** What "retry" sends when the session's process is still alive — a failed
+ *  main-thread turn does not end a `claude -p` process while a background
+ *  subagent or monitor keeps running, and a resume against a live process is
+ *  refused by the drive lease (`session_driver::Refusal::ProcessAlive`). The
+ *  only way to get the turn going again is a message into that process.
+ *  Agent-facing prompt text, so it stays in the product's language. */
+export const RETRY_LIVE_PROMPT = "上一轮因 API 报错中断了，请从中断处继续。";
+
+/** Actions that start a fresh `claude --resume` with different launch
+ *  settings. A live process cannot be resumed, so these cannot work while it
+ *  runs and must not be drawn. `retry` is not here: it can be delivered into
+ *  the live process instead. */
+export function actionsForLiveSession(actions: ErrorAction[]): ErrorAction[] {
+  return actions.filter((a) => a !== "compact" && a !== "switchModel");
+}
+
 /** How loudly the card presents itself. `wait` is its own tier because a rate
  *  limit is not a failure the user caused or can fix — it is a countdown, and
  *  Fleet usually resumes it unattended. Painting it the same red as a revoked
