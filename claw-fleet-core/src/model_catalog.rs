@@ -682,10 +682,9 @@ a model gets chosen: the `Agent` tool's `model` param, `Workflow` `agent()`'s \
         if has("dsh") {
             s.push_str(
                 "\n\
-`deepseek-official` 这一路现在只推 `deepseek-flash` 一个。另外三个 id 仍然点得动,\
-但都在退役:`deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 已经是它的别名,\
-`deepseek-v4-pro` 从 2026-09-14 12:00(北京)起请求也转由它承接。flash 那几个 id \
-都收图片,**只有 `deepseek-v4-pro` 不收图片输入**。\n",
+`deepseek-official` 这一路只推 `deepseek-flash`。`deepseek-v4-flash`、\
+`deepseek-v4-flash-vision-exp`、`deepseek-v4-pro` 仍点得动,但都已退役、请求由它承接;\
+**只有 `deepseek-v4-pro` 不收图片输入**。\n",
             );
         }
         s.push_str(
@@ -717,11 +716,9 @@ effort 一列显示「见 dsh」——那些的梯子五花八门,得问 dsh 自
         if has("dsh") {
             s.push_str(
                 "\n\
-The `deepseek-official` route now offers just `deepseek-flash`. The other three ids \
-still resolve but are all on the way out: `deepseek-v4-flash` and \
-`deepseek-v4-flash-vision-exp` are already aliases of it, and `deepseek-v4-pro`'s \
-requests move to it too from 2026-09-14 12:00 Beijing time. On images, every flash id \
-takes them and **only `deepseek-v4-pro` rejects image input**.\n",
+The `deepseek-official` route offers just `deepseek-flash`. `deepseek-v4-flash`, \
+`deepseek-v4-flash-vision-exp` and `deepseek-v4-pro` still resolve but are retired and \
+served by it; **only `deepseek-v4-pro` rejects image input**.\n",
             );
         }
         s.push_str(
