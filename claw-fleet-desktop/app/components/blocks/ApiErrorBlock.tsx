@@ -118,6 +118,7 @@ const TITLE_FALLBACK: Record<string, string> = {
   "detail.api_error.rate_limit": "已达用量上限",
   "detail.api_error.model_quota": "该模型额度已用完",
   "detail.api_error.server": "连不上 API",
+  "detail.api_error.network_blocked": "网络被拦截",
   "detail.api_error.too_long": "上下文超长",
   "detail.api_error.compaction_blocked": "压缩也被配额挡住了",
   "detail.api_error.billing": "余额不足",

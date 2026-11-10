@@ -803,6 +803,29 @@ mod tests {
     }
 
     #[test]
+    fn network_edge_403_from_2_1_322_is_retryable() {
+        // Claude Code 2.1.322 rewords the edge 403 and files it under
+        // invalid_request; shape copied from a real transcript record.
+        let text = "API Error: Request blocked before it reached Anthropic's API (HTTP 403) \
+                    · the network this request came from isn't allowed";
+        let mut tagged = api_error_msg("invalid_request", text, "2026-11-10T09:10:03.336Z");
+        tagged["apiError"] = serde_json::json!("network_edge_blocked");
+        tagged["apiErrorStatus"] = serde_json::json!(403);
+        assert!(detect_server_error(&[user_msg(), tagged]));
+
+        // A later build that drops the tag but keeps the status still counts.
+        let mut status_only = api_error_msg("invalid_request", text, "2026-11-10T09:10:03.336Z");
+        status_only["apiErrorStatus"] = serde_json::json!(403);
+        assert!(detect_server_error(&[user_msg(), status_only]));
+
+        // An over-long prompt (400) stays permanent.
+        let mut too_long =
+            api_error_msg("invalid_request", "Prompt is too long", "2026-11-10T09:10:03.336Z");
+        too_long["apiErrorStatus"] = serde_json::json!(400);
+        assert!(!detect_server_error(&[user_msg(), too_long]));
+    }
+
+    #[test]
     fn auth_403_stale_when_real_turn_follows() {
         let lines = vec![
             user_msg(),

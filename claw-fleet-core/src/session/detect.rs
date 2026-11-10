@@ -334,6 +334,9 @@ fn is_unparseable_tool_call(v: &Value) -> bool {
 /// existing per-episode cap and debounce bound the retries, so one that does
 /// persist stops after a few attempts.
 fn is_transient_auth_failure(v: &Value) -> bool {
+    if is_network_edge_block(v) {
+        return true;
+    }
     if v.get("error").and_then(|e| e.as_str()) != Some("authentication_failed") {
         return false;
     }
@@ -352,6 +355,21 @@ fn is_transient_auth_failure(v: &Value) -> bool {
                     || t.contains("OAuth session expired and could not be refreshed")
             })
     })
+}
+
+/// The same edge 403 as "403 Request not allowed", reworded by Claude Code
+/// 2.1.322: "Request blocked before it reached Anthropic's API (HTTP 403) · the
+/// network this request came from isn't allowed". That build also moved it to
+/// `error: "invalid_request"` and tagged it `apiError: "network_edge_blocked"`,
+/// `apiErrorStatus: 403` — so the text whitelist above silently stopped
+/// retrying it. Matched on the tag, or on a 403 carried by `invalid_request`
+/// (an over-long prompt is a 400), not on the prose.
+fn is_network_edge_block(v: &Value) -> bool {
+    if v.get("apiError").and_then(|e| e.as_str()) == Some("network_edge_blocked") {
+        return true;
+    }
+    v.get("error").and_then(|e| e.as_str()) == Some("invalid_request")
+        && v.get("apiErrorStatus").and_then(|s| s.as_u64()) == Some(403)
 }
 
 /// True iff the last meaningful (user/assistant) record is a synthetic

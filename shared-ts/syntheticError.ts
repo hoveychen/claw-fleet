@@ -117,6 +117,11 @@ export interface SyntheticErrorSource {
   error?: unknown;
   isApiErrorMessage?: unknown;
   quotaLimits?: unknown;
+  /** Finer-grained cause Claude Code added alongside `error` (seen from
+   *  2.1.322), e.g. `"network_edge_blocked"`. */
+  apiError?: unknown;
+  /** HTTP status of the failed request, when Claude Code recorded one. */
+  apiErrorStatus?: unknown;
   message?: {
     model?: string;
     content?: unknown;
@@ -185,6 +190,14 @@ function isModelQuota(text: string): boolean {
   return /^You've reached your\b/.test(text);
 }
 
+/** The network-edge refusal: tagged `apiError: "network_edge_blocked"` by
+ *  2.1.322, and recognised by its 403 on an `invalid_request` record in case a
+ *  later build renames the tag — an over-long prompt is a 400, never a 403. */
+function isNetworkEdgeBlock(src: SyntheticErrorSource, code: string): boolean {
+  if (src.apiError === "network_edge_blocked") return true;
+  return code === "invalid_request" && src.apiErrorStatus === 403;
+}
+
 /** Classify a transcript record, or return `null` when it is not a synthetic
  *  API error (an ordinary turn, or the "No response requested." filler, which
  *  is synthetic but carries `isApiErrorMessage: false`). */
@@ -201,6 +214,21 @@ export function classifySyntheticError(
   const quota = quotaOf(src);
 
   const base = { code, text, quota } as const;
+
+  // Claude Code 2.1.322 moved the network-edge 403 ("Request blocked before it
+  // reached Anthropic's API (HTTP 403) · the network this request came from
+  // isn't allowed") from `authentication_failed` to `invalid_request`, which
+  // the switch below reads as an over-long prompt. Nothing is wrong with the
+  // context or the login: the request was refused at the edge (VPN / proxy /
+  // region), so retry is the only honest move. Checked ahead of the enum.
+  if (isNetworkEdgeBlock(src, raw)) {
+    return {
+      ...base,
+      severity: "transient",
+      titleKey: "detail.api_error.network_blocked",
+      actions: ["retry"],
+    };
+  }
 
   switch (code) {
     case "rate_limit":
