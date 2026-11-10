@@ -98,3 +98,18 @@ export function setWebApiPrefix(prefix: string): void {
 export function webApiOrigin(): string {
   return `${window.location.origin}${webApiPrefix}`;
 }
+
+/**
+ * Whether a sandboxed (opaque-origin) preview frame must be handed its
+ * document as `srcDoc` because it cannot load anything by URL.
+ *
+ * True only when the bundle runs from a relay with data tunnelled: the
+ * Service Worker that bridges `/desktop/h/…` to the socket never sees an
+ * opaque-origin frame's requests (measured 2026-11-10), so `src` would show
+ * the relay's fallback page. The desktop's custom protocols and `fleet webui`
+ * keep loading by URL, which also keeps runtime `fetch()` and links between a
+ * doc's pages working there — see `sandboxDoc.ts` for what inlining loses.
+ */
+export function sandboxFramesNeedInline(): boolean {
+  return webApiPrefix !== "";
+}

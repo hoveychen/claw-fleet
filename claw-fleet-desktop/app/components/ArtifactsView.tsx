@@ -35,7 +35,9 @@ import { useTranslation } from "react-i18next";
 import { artifactBlobUrl } from "../artifactAssets";
 import { canRevealPath } from "../canReveal";
 import { formatBytes } from "../formatBytes";
-import { isWebBuild } from "../hostEnv";
+import { isWebBuild, sandboxFramesNeedInline } from "../hostEnv";
+import { fetchSandboxDoc } from "../sandboxDoc";
+import { useSandboxDoc } from "./useSandboxDoc";
 import { getItem, setItem } from "../storage";
 import { useUIStore } from "../store";
 import { dropTargetAt, usePointerDrag } from "../hooks/usePointerDrag";
@@ -2275,6 +2277,13 @@ function PreviewStage({ item }: { item: StageItem }) {
   const textMode = item.kind === "text" ? textPreviewMode(item.mime) : null;
   const needsBody = textMode === "markdown" || textMode === "plain";
   const [mediaLoaded, onMediaLoaded] = useMediaLoaded(url);
+  // Relay mode: the sandboxed html frame cannot load by URL, so the parent
+  // fetches the page and hands it over as `srcDoc` (see `sandboxDoc.ts`). An
+  // artifact is a single file — there is no directory for relative refs.
+  const inlined = useSandboxDoc(
+    textMode === "html" && sandboxFramesNeedInline() ? url : null,
+    () => fetchSandboxDoc("index.html", (path) => (path === "index.html" ? url : null)),
+  );
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const imageFailed = failedUrl === url;
 
@@ -2360,19 +2369,31 @@ function PreviewStage({ item }: { item: StageItem }) {
     );
   }
   if (textMode === "html") {
+    if (inlined?.status === "error") {
+      return (
+        <div className={styles.stage}>
+          {failed(t("artifacts.preview_load_failed", "预览没能加载出来。"))}
+        </div>
+      );
+    }
     // allow-scripts but NOT allow-same-origin: an agent-produced page may run
     // its own JS while staying a cross-origin document with no reach into
     // Tauri IPC. Same policy as the wiki's html frame.
     return (
       <div className={styles.stage}>
-        {mediaSkeleton}
-        <iframe
-          className={styles.doc_frame}
-          sandbox="allow-scripts"
-          src={url}
-          title={item.title}
-          onLoad={onMediaLoaded}
-        />
+        {(inlined?.status === "loading" || !mediaLoaded) && (
+          <SkeletonCard height="100%" className={styles.stage_skeleton} />
+        )}
+        {inlined?.status !== "loading" && (
+          <iframe
+            className={styles.doc_frame}
+            sandbox="allow-scripts"
+            src={inlined ? undefined : url}
+            srcDoc={inlined?.status === "ready" ? inlined.doc : undefined}
+            title={item.title}
+            onLoad={onMediaLoaded}
+          />
+        )}
       </div>
     );
   }
