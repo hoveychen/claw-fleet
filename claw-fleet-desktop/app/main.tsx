@@ -132,7 +132,26 @@ async function boot() {
       // Before the transport, which installs `__TAURI_INTERNALS__` itself and
       // so destroys the evidence `isTauriHost()` just read.
       markWebBuild();
-      await installWebTransport();
+      // Served from a relay origin under `/desktop/`: the data routes are not
+      // on this origin, they are tunnelled to the paired Mac over the relay.
+      const { relayMountPath } = await import("./relay/tunnel");
+      const relayMount = relayMountPath(window.location.pathname);
+      if (relayMount) {
+        const { bootRelayTransport } = await import("./relay/relayBoot");
+        const relay = await bootRelayTransport(relayMount);
+        if (!relay) {
+          // Nothing paired: the boot module shows the pairing pointer.
+          window.clearTimeout(bootSkeletonTimer);
+          return;
+        }
+        const { relayEventStream } = await import("./relay/relayEvents");
+        await installWebTransport({
+          probeBase: relay.prefix,
+          eventStream: relayEventStream(relay.socket),
+        });
+      } else {
+        await installWebTransport();
+      }
       // Cache the hash-named /assets/ chunks so a redeploy only re-downloads
       // what actually changed — the Office preview alone is ~1.6 MB of lazily
       // loaded code. Browser build only: the desktop webview loads the same

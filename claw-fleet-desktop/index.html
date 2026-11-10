@@ -34,6 +34,10 @@
           // 已经在移动端路径下了。这条防的是死循环：万一因为缓存或误配，这段
           // 脚本在 /m/ 下也跑了一遍。
           if (env.pathname.indexOf("/m/") === 0) return null;
+          // Mounted on a relay origin: there is no /m/ there (mobile-web sits
+          // at the relay root), and opening /desktop/ is already an explicit
+          // choice of the desktop UI.
+          if (env.pathname.indexOf("/desktop/") === 0) return null;
           // ?desktop 是当场的强制，记住的偏好是之前某次强制留下的。
           // 两条路径都在函数里判，外层只负责取环境：判定完整地住在能被测的
           // 地方，外层就没有「自己算一半」的余地。

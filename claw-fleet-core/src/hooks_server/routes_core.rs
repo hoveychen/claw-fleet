@@ -146,7 +146,17 @@ pub(crate) fn route_sessions_snapshot(
         let _ = request.respond(tiny_http::Response::empty(204));
         return;
     }
-    let frame = super::SESSIONS_TRACKER.lock().unwrap().snapshot();
+    // A poller a few frames behind (the desktop web over the relay, which has
+    // no SSE) gets one delta from its seq instead of the whole list: ~2.5 MB
+    // per poll on a busy host otherwise.
+    let frame = {
+        let tracker = super::SESSIONS_TRACKER.lock().unwrap();
+        query
+            .get("since")
+            .and_then(|s| s.parse::<u64>().ok())
+            .and_then(|since| tracker.delta_since(since))
+            .unwrap_or_else(|| tracker.snapshot())
+    };
     let body = serde_json::to_string(&frame).unwrap_or_default();
     let _ = request.respond(tiny_http::Response::from_string(body).with_header(json_header));
 }

@@ -2275,9 +2275,46 @@ const SESSIONS_POLL_QUIET_MS = 10_000;
  * answers 204 while nothing changed — so a quiet board costs a status line
  * every 3s, not the whole list.
  */
+/** Set when `/events` is not used at all: then the poll is the only channel,
+ *  and its own frames must not count as "SSE is delivering, stay quiet". */
+let pollOnly = false;
+
+/** Whether a transport-supplied event stream (`installLiveProxy`'s
+ *  `eventStream: LiveEventStream`) currently holds a live subscription. */
+let customStreamUp = false;
+let lastPollAt = 0;
+
+/**
+ * Poll cadence while a transport stream is up: only after this long with
+ * neither a frame nor a poll. Frames ride the stream, so the poll is a safety
+ * net for a silently lost frame on a quiet board, where `since` answers 204.
+ *
+ * Not a fixed timer: `/sessions_snapshot` frames the current list before it
+ * compares `since`, so on a busy board a poll nearly always lands on a change
+ * the broadcaster has not pushed yet and comes back as the whole list —
+ * measured 2.2MB per poll over the relay on a 1,470-row fleet.
+ */
+export const SESSIONS_POLL_STREAM_MS = 30_000;
+
+/** Whether this 3s tick should poll. Exported for the test. */
+export function shouldPollSessions(s: {
+  now: number;
+  pollOnly: boolean;
+  streamUp: boolean;
+  lastFrameAt: number;
+  lastPollAt: number;
+}): boolean {
+  if (s.streamUp) return s.now - Math.max(s.lastPollAt, s.lastFrameAt) >= SESSIONS_POLL_STREAM_MS;
+  if (s.pollOnly) return true;
+  return s.now - s.lastFrameAt >= SESSIONS_POLL_QUIET_MS;
+}
+
 function startSessionsPoll() {
   window.setInterval(async () => {
-    if (Date.now() - lastFrameAt < SESSIONS_POLL_QUIET_MS) return;
+    const now = Date.now();
+    if (!shouldPollSessions({ now, pollOnly, streamUp: customStreamUp, lastFrameAt, lastPollAt }))
+      return;
+    lastPollAt = now;
     try {
       const frame = await callProbe({
         method: "GET",
@@ -2483,11 +2520,60 @@ function startEventStream() {
   }
 }
 
-export function installLiveProxy() {
+/** What a transport-supplied event stream reports into. */
+export interface LiveEventSink {
+  /** One event, under the same name and payload `/events` would carry. */
+  event(name: string, payload: unknown): void;
+  /** Subscription live: the sessions poll drops to its slow cadence. */
+  up(): void;
+  /** Subscription lost: the sessions poll goes back to every tick. */
+  down(why: string): void;
+}
+
+/** An `/events` stand-in for a transport that cannot carry SSE (the relay). */
+export interface LiveEventStream {
+  start(sink: LiveEventSink): void;
+}
+
+/** Feed a transport stream's events into the app bus, as `/events` would. */
+function startCustomStream(stream: LiveEventStream) {
+  const forwarded = new Set(FORWARDED_SSE_EVENTS);
+  stream.start({
+    event(name, payload) {
+      if (!forwarded.has(name)) return;
+      if (name === "sessions-frame") noteFrame(payload);
+      emit(name, payload);
+    },
+    up() {
+      customStreamUp = true;
+      logLine("live stream up — sessions poll slowed to a safety net");
+    },
+    down(why) {
+      customStreamUp = false;
+      logLine(`live stream down (${why}) — polling every tick`);
+    },
+  });
+}
+
+/**
+ * `eventStream: false` skips `/events` entirely — for transports that cannot
+ * carry a long-lived stream (the relay tunnel answers one request with one
+ * reply). The board then rides the sessions poll from its first tick and cards
+ * the decision reconcile poll, instead of retrying an EventSource that can
+ * never open.
+ *
+ * A `LiveEventStream` replaces `/events` with the transport's own push (the
+ * relay socket). The poll runs every tick only while that stream is down.
+ */
+export function installLiveProxy(opts: { eventStream?: boolean | LiveEventStream } = {}) {
   if (document.body) installLogNode();
   else window.addEventListener("DOMContentLoaded", installLogNode);
   logLine(`live proxy armed → ${LIVE_BASE}`);
+  const custom = typeof opts.eventStream === "object" ? opts.eventStream : null;
+  pollOnly = opts.eventStream === false || custom != null;
   startSessionsPoll();
-  startEventStream();
+  if (custom) startCustomStream(custom);
+  else if (pollOnly) logLine("SSE disabled for this transport — polling only");
+  else startEventStream();
   (window as unknown as Record<string, unknown>).__liveProxyReport = liveProxyReport;
 }

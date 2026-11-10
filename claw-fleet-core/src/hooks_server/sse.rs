@@ -46,6 +46,8 @@ impl SseBroadcaster {
     }
 
     pub fn broadcast(&self, event_type: &str, data: &str) {
+        // A desktop tab on the relay renders from the same events.
+        crate::relay_events::publish(event_type, data);
         let mut clients = self.clients.lock().unwrap();
         for client in clients.iter_mut() {
             client.send_event(event_type, data);

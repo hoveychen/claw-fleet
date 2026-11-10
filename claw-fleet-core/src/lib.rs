@@ -129,6 +129,8 @@ pub mod process_util;
 pub mod queued_command;
 pub mod relay_crypto;
 pub mod relay_region;
+pub mod relay_events;
+pub mod relay_http;
 pub mod relay_role;
 pub mod routes;
 pub mod ui_types;

@@ -12,8 +12,10 @@ import {
 import { useFadeOnChange } from "../hooks/useFadeOnChange";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
-import { isWebBuild } from "../hostEnv";
+import { isWebBuild, sandboxFramesNeedInline } from "../hostEnv";
 import { wikiFileUrl } from "../wikiAssets";
+import { fetchSandboxDoc } from "../sandboxDoc";
+import { useSandboxDoc } from "./useSandboxDoc";
 import { downloadWikiExport } from "../mock/liveProxy";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
@@ -1276,6 +1278,12 @@ export function WikiDocBody({
   const [frameLoaded, setFrameLoaded] = useState<string | null>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const lightbox = useIframeImgZoom(frameRef);
+  // Relay mode: the sandboxed frame cannot load by URL, so the doc and its
+  // relative assets arrive inlined as `srcDoc` (see `sandboxDoc.ts`).
+  const inlined = useSandboxDoc(
+    doc.kind !== "markdown" && sandboxFramesNeedInline() ? frameKey : null,
+    () => fetchSandboxDoc(doc.entry, (path) => wikiFileUrl(doc.slug, version, path)),
+  );
 
   useEffect(() => {
     if (doc.kind !== "markdown") {
@@ -1311,18 +1319,25 @@ export function WikiDocBody({
     // allow-scripts but NOT allow-same-origin: demos can run JS while staying a
     // cross-origin document with no reach into Tauri IPC.
     // `load` fires for error pages too, so the bar cannot run forever.
+    if (inlined?.status === "error") {
+      return <p className={styles.error}>{inlined.error}</p>;
+    }
+    const pending = inlined?.status === "loading";
     return (
       <div className={styles.html_frame_wrap}>
-        <TopProgress active={frameLoaded !== frameKey} />
-        <iframe
-          key={frameKey}
-          ref={frameRef}
-          className={styles.html_frame}
-          sandbox="allow-scripts"
-          src={wikiFileUrl(doc.slug, version, doc.entry)}
-          title={doc.title}
-          onLoad={() => setFrameLoaded(frameKey)}
-        />
+        <TopProgress active={pending || frameLoaded !== frameKey} />
+        {!pending && (
+          <iframe
+            key={frameKey}
+            ref={frameRef}
+            className={styles.html_frame}
+            sandbox="allow-scripts"
+            src={inlined ? undefined : wikiFileUrl(doc.slug, version, doc.entry)}
+            srcDoc={inlined?.status === "ready" ? inlined.doc : undefined}
+            title={doc.title}
+            onLoad={() => setFrameLoaded(frameKey)}
+          />
+        )}
         {lightbox}
       </div>
     );

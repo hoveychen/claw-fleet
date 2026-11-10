@@ -13,58 +13,6 @@ async function loadWeb() {
 
 const PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 
-describe("isRelativeAssetRef", () => {
-  it("only claims refs that resolve against the asset directory", async () => {
-    const { isRelativeAssetRef } = await loadWeb();
-    expect(isRelativeAssetRef("chart.png")).toBe(true);
-    expect(isRelativeAssetRef("sub/chart.png")).toBe(true);
-    // Already reachable or already inline — inlining these would be a wasted
-    // fetch at best and a broken rewrite at worst.
-    expect(isRelativeAssetRef("data:image/png;base64,AAAA")).toBe(false);
-    expect(isRelativeAssetRef("https://example.com/a.png")).toBe(false);
-    expect(isRelativeAssetRef("//cdn.example.com/a.png")).toBe(false);
-    expect(isRelativeAssetRef("/decision_asset/x/q0/a.png")).toBe(false);
-    expect(isRelativeAssetRef("#frag")).toBe(false);
-    expect(isRelativeAssetRef("")).toBe(false);
-  });
-});
-
-describe("inlineRelativeImages", () => {
-  it("swaps every relative img src for what the loader returns", async () => {
-    const { inlineRelativeImages } = await loadWeb();
-    const html =
-      '<figure><img src="a.png" alt="x"><img src=\'sub/b.png\'>' +
-      '<img src="https://cdn/c.png"></figure>';
-    const out = await inlineRelativeImages(html, async (rel) => `data:image/png;base64,${rel}`);
-    expect(out).toContain('src="data:image/png;base64,a.png"');
-    expect(out).toContain("src='data:image/png;base64,sub/b.png'");
-    // Untouched: it was already reachable.
-    expect(out).toContain('src="https://cdn/c.png"');
-    // Attributes around the src survive the rewrite.
-    expect(out).toContain('alt="x"');
-  });
-
-  it("inlines unquoted img src values too", async () => {
-    const { inlineRelativeImages } = await loadWeb();
-    const html = "<figure><img src=d-cold.png><figcaption>x</figcaption></figure><img alt=y src=m.png />";
-    const out = await inlineRelativeImages(html, async (rel) => `data:image/png;base64,${rel}`);
-    expect(out).toContain('<img src="data:image/png;base64,d-cold.png">');
-    expect(out).toContain('alt=y src="data:image/png;base64,m.png" />');
-  });
-
-  it("leaves a ref whose fetch failed alone rather than blanking the preview", async () => {
-    const { inlineRelativeImages } = await loadWeb();
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    const html = '<img src="ok.png"><img src="gone.png">';
-    const out = await inlineRelativeImages(html, async (rel) => {
-      if (rel === "gone.png") throw new Error("HTTP 404");
-      return "data:image/png;base64,OK";
-    });
-    expect(out).toContain('src="data:image/png;base64,OK"');
-    expect(out).toContain('src="gone.png"');
-  });
-});
-
 describe("fetchDecisionAssetDoc", () => {
   beforeEach(() => {
     vi.restoreAllMocks();

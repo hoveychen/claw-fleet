@@ -60,8 +60,13 @@ export function showsMobilePanel(
   webBuildHost: boolean,
   protocol: string,
   hostname: string,
+  relayTunnel = false,
 ): boolean {
   if (!webBuildHost) return true;
+  // Opened from a relay origin: the page is itself a client of an already
+  // paired Mac, and the relay origin is not a host that could own a pairing
+  // code (the Mac's pairing routes are not tunnelled either).
+  if (relayTunnel) return false;
   if (protocol !== "https:") return false;
   return !isLoopbackHostname(hostname);
 }
@@ -77,4 +82,44 @@ function isLoopbackHostname(hostname: string): boolean {
     h === "::1" ||
     h === "[::1]"
   );
+}
+
+/**
+ * Path prefix the browser build's data routes sit under, on this page's
+ * origin. Empty for `fleet webui` (routes at the root); `/desktop/h` when the
+ * bundle is served from a relay and routes are tunnelled (`relay/tunnel.ts`).
+ */
+let webApiPrefix = "";
+
+/** Set once at boot by the relay transport. Nothing else may call this. */
+export function setWebApiPrefix(prefix: string): void {
+  webApiPrefix = prefix.replace(/\/$/, "");
+}
+
+/** True when the data routes are tunnelled over the relay (`/desktop/` mount). */
+export function isRelayTunnel(): boolean {
+  return webApiPrefix !== "";
+}
+
+/**
+ * Absolute base for asset URLs the browser loads by itself (`<img src>`,
+ * `<iframe src>`, downloads) — origin plus the route prefix.
+ */
+export function webApiOrigin(): string {
+  return `${window.location.origin}${webApiPrefix}`;
+}
+
+/**
+ * Whether a sandboxed (opaque-origin) preview frame must be handed its
+ * document as `srcDoc` because it cannot load anything by URL.
+ *
+ * True only when the bundle runs from a relay with data tunnelled: the
+ * Service Worker that bridges `/desktop/h/…` to the socket never sees an
+ * opaque-origin frame's requests (measured 2026-11-10), so `src` would show
+ * the relay's fallback page. The desktop's custom protocols and `fleet webui`
+ * keep loading by URL, which also keeps runtime `fetch()` and links between a
+ * doc's pages working there — see `sandboxDoc.ts` for what inlining loses.
+ */
+export function sandboxFramesNeedInline(): boolean {
+  return webApiPrefix !== "";
 }
