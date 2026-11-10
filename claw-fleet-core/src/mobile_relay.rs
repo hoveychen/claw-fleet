@@ -2683,6 +2683,10 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "proc_resize" => serve_proc_resize(params),
         "proc_kill" => serve_proc_kill(params),
         "proc_clear" => serve_proc_clear(params),
+        // ── HTTP tunnel ─────────────────────────────────────────────────────
+        // The desktop web bundle's fetches, replayed against this host's own
+        // `fleet serve` routes behind a whitelist — see relay_http.
+        "http" => crate::relay_http::serve_http(params),
         other => Err(format!("unknown method: {other}")),
     }
 }

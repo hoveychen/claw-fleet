@@ -313,6 +313,8 @@ pub fn serve(opts: ServeOptions) {
         let _ = std::fs::write(&pp, actual_port.to_string());
         let _ = std::fs::write(&tp, &token);
     }
+    // The relay `http` tunnel replays requests against this very server.
+    crate::relay_http::register_loopback_target(&host, actual_port, &token, no_auth);
     {
         use std::io::Write as _;
         println!("FLEET_PROBE_PORT={}", actual_port);
@@ -1051,6 +1053,78 @@ fn run_request_worker(
             }
         }
     }
+}
+
+/// Start a loopback-only request server inside a process that runs no
+/// `serve` — the desktop app — for the relay `http` tunnel to replay against.
+///
+/// Only the request workers: none of `serve`'s process-level duties (ctrlc
+/// exit handler, port/token discovery files, SSE broadcaster loop, headless
+/// ticker, relay client, ACP, library workers). The desktop already owns those
+/// roles, and running them twice would duplicate auto-resume and relay
+/// publishing. Binds `127.0.0.1:0` with a random admin token that is only ever
+/// handed to [`crate::relay_http`], so nothing else on the machine can use it.
+pub fn spawn_embedded_loopback() -> Result<crate::relay_http::LoopbackTarget, String> {
+    let server = tiny_http::Server::http("127.0.0.1:0").map_err(|e| e.to_string())?;
+    let port = server
+        .server_addr()
+        .to_ip()
+        .map(|a| a.port())
+        .ok_or("embedded loopback server has no IP address")?;
+    let token = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+
+    let sources = Arc::new(build_sources());
+    let snapshot = crate::session_snapshot::SessionSnapshot::new(sources.clone());
+    snapshot.start_ticker();
+    let report_store = Arc::new(Mutex::new(ReportStore::open()?));
+    let llm_config: Arc<Mutex<LlmConfig>> = Arc::new(Mutex::new(LlmConfig::load()));
+    let audit_history = Arc::new(Mutex::new(crate::audit::AuditHistory::load()));
+    let search_db_path = crate::session::real_home_dir()
+        .ok_or("cannot determine home dir")?
+        .join(".fleet")
+        .join("fleet-search.db");
+    // Schema create/repair once, as serve() does, before the workers' plain opens.
+    drop(SearchIndex::open_at(&search_db_path).map_err(|e| e.to_string())?);
+    let sse = SseBroadcaster::new();
+
+    let server = Arc::new(server);
+    for _ in 0..2 {
+        let server = server.clone();
+        let sources = sources.clone();
+        let report_store = report_store.clone();
+        let llm_config = llm_config.clone();
+        let audit_history = audit_history.clone();
+        let db_path = search_db_path.clone();
+        let token = token.clone();
+        let sse = sse.clone();
+        let snapshot = snapshot.clone();
+        std::thread::spawn(move || {
+            run_request_worker(
+                server,
+                sources,
+                report_store,
+                llm_config,
+                audit_history,
+                db_path,
+                token,
+                None,
+                false,
+                None,
+                sse,
+                snapshot,
+            )
+        });
+    }
+    eprintln!("[relay http] embedded loopback server on 127.0.0.1:{port}");
+    Ok(crate::relay_http::LoopbackTarget {
+        host: "127.0.0.1".to_string(),
+        port,
+        token: Some(token),
+    })
 }
 
 /// Serve one request: authorize, then dispatch to its route handler.
