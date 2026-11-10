@@ -55,6 +55,11 @@ pub const INJECT_RULES: &[&str] = &[
     "Read(*)",
     "Write(*)",
     "Edit(*)",
+    // See `ANY_PATH_RULES`: from Claude Code 2.1.322 on, `Read(*)` no longer
+    // covers a file outside the working directories.
+    "Read(//**)",
+    "Write(//**)",
+    "Edit(//**)",
     "WebFetch(*)",
     "WebSearch(*)",
     "Skill(*)",
@@ -80,6 +85,19 @@ pub const INJECT_RULES: &[&str] = &[
     "mcp__fleet__fleet__image",
     "mcp__fleet__fleet__image_edit",
 ];
+
+/// The absolute-path spelling of the file-tool rules. Claude Code 2.1.322
+/// stopped matching `Read(*)` / `Edit(*)` against paths outside the working
+/// directories (verified 2026-11-10: the same `-p` probe reading a file under
+/// `~/.fleet` passes on 2.1.310 with `Read(*)` and is denied on 2.1.322, while
+/// `Read(//**)` passes on 2.1.322), so every pasted image under
+/// `~/.fleet/user-attachments` and every chat-session write into a project
+/// raised a permission card. `//**` is "any absolute path".
+///
+/// These were added long after Fleet stopped writing rules globally, so
+/// [`deactivate`] never strips them — a user's own hand-written `Read(//**)`
+/// in `~/.claude/settings.json` is theirs.
+const ANY_PATH_RULES: &[&str] = &["Read(//**)", "Write(//**)", "Edit(//**)"];
 
 const LOCK_FILE_NAME: &str = "permissions-lock.json";
 const CLAUDE_SETTINGS_FILE: &str = "settings.json";
@@ -195,7 +213,10 @@ fn strip_fleet_rules_in(v: &mut serde_json::Value) -> bool {
         return false;
     };
     let before = allow.len();
-    allow.retain(|r| !r.as_str().is_some_and(|s| INJECT_RULES.contains(&s)));
+    allow.retain(|r| {
+        !r.as_str()
+            .is_some_and(|s| INJECT_RULES.contains(&s) && !ANY_PATH_RULES.contains(&s))
+    });
     if allow.len() == before {
         return false;
     }
@@ -265,7 +286,8 @@ mod tests {
     fn legacy_inject() {
         let (mut v, existed) = read_settings().unwrap();
         let mut allow = allow_of(&v);
-        for rule in INJECT_RULES {
+        // Old builds predate ANY_PATH_RULES, so they never wrote them globally.
+        for rule in INJECT_RULES.iter().filter(|r| !ANY_PATH_RULES.contains(r)) {
             if !allow.iter().any(|s| s == rule) {
                 allow.push((*rule).to_string());
             }
@@ -340,6 +362,25 @@ mod tests {
             INJECT_RULES.contains(&"PowerShell(*)"),
             "PowerShell(*) must be injected so the Windows PowerShell tool is pre-authorised"
         );
+    }
+
+    /// Regression: Claude Code 2.1.322 stopped matching `Read(*)` against a
+    /// path outside the working directories, so pasted images under
+    /// `~/.fleet/user-attachments` raised a permission card on every Read.
+    #[test]
+    fn inject_rules_preauthorise_file_tools_on_any_absolute_path() {
+        for rule in ANY_PATH_RULES {
+            assert!(INJECT_RULES.contains(rule), "{rule} missing from INJECT_RULES");
+        }
+    }
+
+    #[test]
+    fn deactivate_keeps_a_user_written_any_path_rule() {
+        let mut v = serde_json::json!({
+            "permissions": { "allow": ["Read(*)", "Read(//**)"] },
+        });
+        assert!(strip_fleet_rules_in(&mut v));
+        assert_eq!(v["permissions"]["allow"], serde_json::json!(["Read(//**)"]));
     }
 
     #[test]
