@@ -15,7 +15,7 @@
 //! The mobile relay diffs its slimmed snapshot with the same helpers
 //! ([`per_id_hashes`], [`diff_snapshot`], [`snapshot_hash`]).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -65,7 +65,17 @@ pub struct DeltaTracker {
     /// The last list framed, kept so [`snapshot`](Self::snapshot) can answer a
     /// resync without a rescan.
     last: Vec<Value>,
+    /// Baselines (seq, id → hash, id order) of the frames before the current
+    /// one, newest last, so [`delta_since`](Self::delta_since) can answer a
+    /// poller that is a few frames behind with one delta instead of the whole
+    /// list.
+    history: VecDeque<(u64, HashMap<String, u64>, Vec<String>)>,
 }
+
+/// How many past baselines [`DeltaTracker`] keeps for
+/// [`DeltaTracker::delta_since`]. A poller every 3s against a list that
+/// reframes about as often is rarely more than one or two behind.
+const DELTA_HISTORY: usize = 16;
 
 impl DeltaTracker {
     /// `const` so a process-wide tracker can live in a `static Mutex`.
@@ -75,6 +85,7 @@ impl DeltaTracker {
             baseline: None,
             order: Vec::new(),
             last: Vec::new(),
+            history: VecDeque::new(),
         }
     }
 
@@ -92,7 +103,11 @@ impl DeltaTracker {
         }
         let base_seq = self.seq;
         self.seq += 1;
-        self.baseline = Some(hashes_of(sessions));
+        let prev = self.baseline.replace(hashes_of(sessions)).unwrap_or_default();
+        self.history.push_back((base_seq, prev, std::mem::take(&mut self.order)));
+        if self.history.len() > DELTA_HISTORY {
+            self.history.pop_front();
+        }
         self.last = sessions.to_vec();
         self.order = order.clone();
         Some(SessionsFrame::Delta {
@@ -112,6 +127,22 @@ impl DeltaTracker {
             seq: self.seq,
             sessions: self.last.clone(),
         }
+    }
+
+    /// One delta from the state framed as `base` to the current list, when
+    /// `base` is a past seq still in the history. `None` means the caller
+    /// should send [`snapshot`](Self::snapshot) instead (unknown or too old
+    /// a seq, or `base` already current).
+    pub fn delta_since(&self, base: u64) -> Option<SessionsFrame> {
+        let (_, hashes, order) = self.history.iter().find(|(seq, _, _)| *seq == base)?;
+        let (upsert, remove) = diff_rows(hashes, &self.last);
+        Some(SessionsFrame::Delta {
+            seq: self.seq,
+            base_seq: base,
+            upsert,
+            remove,
+            order: (*order != self.order).then(|| self.order.clone()),
+        })
     }
 
     /// Make the next [`frame`](Self::frame) a full one.
@@ -195,6 +226,39 @@ mod tests {
 
     fn rows(v: Value) -> Vec<Value> {
         v.as_array().unwrap().clone()
+    }
+
+    #[test]
+    fn delta_since_spans_several_frames_in_one_delta() {
+        let mut t = DeltaTracker::new();
+        t.frame(&rows(json!([{"id":"a","n":1},{"id":"b","n":1},{"id":"c","n":1}])));
+        let base = t.snapshot().seq();
+        t.frame(&rows(json!([{"id":"a","n":2},{"id":"b","n":1},{"id":"c","n":1}])));
+        t.frame(&rows(json!([{"id":"a","n":2},{"id":"b","n":1},{"id":"d","n":1}])));
+        let Some(SessionsFrame::Delta { seq, base_seq, upsert, remove, order }) = t.delta_since(base)
+        else {
+            panic!("expected a delta");
+        };
+        assert_eq!((seq, base_seq), (t.snapshot().seq(), base));
+        let ids: Vec<&str> = upsert.iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["a", "d"]);
+        assert_eq!(remove, ["c"]);
+        assert_eq!(order.unwrap(), ["a", "b", "d"]);
+        // The current seq and unknown seqs fall back to a full snapshot.
+        assert!(t.delta_since(t.snapshot().seq()).is_none());
+        assert!(t.delta_since(999).is_none());
+    }
+
+    #[test]
+    fn delta_since_forgets_baselines_past_the_history_cap() {
+        let mut t = DeltaTracker::new();
+        t.frame(&rows(json!([{"id":"a","n":0}])));
+        let first = t.snapshot().seq();
+        for n in 1..=(DELTA_HISTORY as i64 + 1) {
+            t.frame(&rows(json!([{"id":"a","n":n}])));
+        }
+        assert!(t.delta_since(first).is_none());
+        assert!(t.delta_since(t.snapshot().seq() - 1).is_some());
     }
 
     #[test]

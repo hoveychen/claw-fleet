@@ -57,8 +57,8 @@ pub const MAX_REQUEST_BYTES: usize = crate::mobile_relay::MAX_UPLOAD_BYTES as us
 const LOOPBACK_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Every `(method, path)` the tunnel forwards. A pattern ending in `/*`
-/// matches that prefix plus a non-empty remainder; anything else matches
-/// exactly.
+/// matches that prefix plus a non-empty remainder; a `*` segment anywhere else
+/// matches exactly one non-empty segment; anything else matches exactly.
 ///
 /// Scope is the "lite" desktop web: what the bundle needs to boot, the session
 /// list and transcripts, pending decision cards and answering them, and the
@@ -129,6 +129,23 @@ pub const HTTP_TUNNEL_ROUTES: &[(&str, &str)] = &[
     ("GET", crate::routes::WIKI_FILE),
     ("GET", crate::routes::WIKI_SEARCH),
     ("GET", "/wiki_asset/*"),
+    // ── Desktop web boot / panels — read-only, each with a phone equivalent
+    ("GET", crate::routes::PROCS),
+    ("GET", crate::routes::SOURCES_CONFIG),
+    ("GET", "/sources/*/usage"),
+    ("GET", crate::routes::SOURCES_CLAUDE_ACCOUNT),
+    ("GET", crate::routes::ARTIFACTS),
+    ("GET", crate::routes::ARTIFACT_BLOB),
+    ("GET", crate::routes::SESSION_EXPLAINS),
+    ("GET", crate::routes::DAILY_REPORT_ATTENTION),
+    ("GET", crate::routes::DAILY_REPORT_STATS),
+    ("GET", crate::routes::HOOKS_PLAN),
+    ("GET", crate::routes::SETUP_STATUS),
+    ("GET", crate::routes::PROJECTS),
+    ("GET", crate::routes::SCRATCHPAD_DIR),
+    // Attachments for answering a card (phone: upload_attachment). Writes
+    // only into the attachment staging directory.
+    ("POST", crate::routes::ELICITATION_UPLOAD),
 ];
 
 /// Where tunnelled requests go: a hooks server in this process.
@@ -178,13 +195,28 @@ fn resolve_target() -> Result<LoopbackTarget, String> {
 /// Whether `(method, path)` is on [`HTTP_TUNNEL_ROUTES`]. `path` must already
 /// have passed [`path_is_clean`].
 pub fn is_allowed(method: &str, path: &str) -> bool {
-    HTTP_TUNNEL_ROUTES.iter().any(|(m, pattern)| {
-        m.eq_ignore_ascii_case(method)
-            && match pattern.strip_suffix('*') {
-                Some(prefix) => path.len() > prefix.len() && path.starts_with(prefix),
-                None => path == *pattern,
-            }
-    })
+    HTTP_TUNNEL_ROUTES
+        .iter()
+        .any(|(m, pattern)| m.eq_ignore_ascii_case(method) && pattern_matches(pattern, path))
+}
+
+fn pattern_matches(pattern: &str, path: &str) -> bool {
+    match pattern.strip_suffix('*') {
+        Some(prefix) if prefix.ends_with('/') && !prefix.contains('*') => {
+            path.len() > prefix.len() && path.starts_with(prefix)
+        }
+        _ => segments_match(pattern, path),
+    }
+}
+
+fn segments_match(pattern: &str, path: &str) -> bool {
+    let pat: Vec<&str> = pattern.split('/').collect();
+    let got: Vec<&str> = path.split('/').collect();
+    pat.len() == got.len()
+        && pat
+            .iter()
+            .zip(&got)
+            .all(|(p, g)| if *p == "*" { !g.is_empty() } else { p == g })
 }
 
 /// A path the tunnel is willing to put on a request line: absolute, no query
@@ -717,13 +749,29 @@ mod tests {
         assert_eq!(connect_host("192.168.1.5"), "192.168.1.5");
     }
 
+    #[test]
+    fn mid_segment_wildcard_matches_one_segment() {
+        assert!(is_allowed("GET", "/sources/codex/usage"));
+        assert!(is_allowed("GET", "/sources/claude/account"));
+        assert!(!is_allowed("GET", "/sources/codex/account"));
+        assert!(!is_allowed("GET", "/sources//usage"));
+        assert!(!is_allowed("GET", "/sources/a/b/usage"));
+        assert!(!is_allowed("GET", "/sources/codex/usage/x"));
+        assert!(is_allowed("GET", "/decision_asset/abc/0/chart.png"));
+        assert!(!is_allowed("GET", "/decision_asset/"));
+        assert!(!is_allowed("GET", "/remote_workspaces"));
+        assert!(!is_allowed("GET", "/ssh_hosts"));
+        assert!(!is_allowed("GET", "/audit"));
+        assert!(is_allowed("POST", "/elicitation/upload"));
+    }
+
     /// Every whitelisted exact path must be a route `fleet serve` actually
     /// dispatches — a typo here would silently 404 instead of failing review.
     #[test]
     fn whitelisted_paths_are_known_routes() {
         let src = include_str!("routes.rs");
         for (_, p) in HTTP_TUNNEL_ROUTES {
-            let needle = p.trim_end_matches('*');
+            let needle = &p[..p.find('*').unwrap_or(p.len())];
             assert!(
                 src.contains(&format!("\"{needle}\"")),
                 "{p} is not a path constant in routes.rs"

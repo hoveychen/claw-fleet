@@ -4488,14 +4488,40 @@ fn join_block_reason(
     None
 }
 
+/// Opt-in for end-to-end runs against a local relay: a `FLEET_HOME`-isolated
+/// `fleet serve`/`webui` may join when `FLEET_RELAY_ISOLATED_E2E=1` *and* its
+/// own pairing secret differs from the one in the real `$HOME/.fleet` config.
+/// The secret check keeps the original guarantee — a fixture never sits on the
+/// user's real channel — even if the variable leaks into a test environment.
+fn isolated_e2e_join_allowed() -> bool {
+    if cfg!(test) || std::env::var("FLEET_RELAY_ISOLATED_E2E").as_deref() != Ok("1") {
+        return false;
+    }
+    let real_secret = std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join(".fleet").join(CONFIG_FILE_NAME))
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<MobileRelayConfig>(&s).ok())
+        .map(|c| c.secret)
+        .unwrap_or_default();
+    isolated_secret_is_distinct(&load_config().secret, &real_secret)
+}
+
+fn isolated_secret_is_distinct(isolated: &str, real: &str) -> bool {
+    !isolated.is_empty() && isolated != real
+}
+
 /// Ensure the outbound relay WebSocket is running. Idempotent; no-op when
 /// the feature is disabled or no secret is set.
 pub fn ensure_ws_client() {
     if let Some(reason) = join_block_reason(cfg!(test), std::env::var_os("FLEET_HOME").as_deref()) {
-        // Logged rather than silent: if this ever fires for a real desktop the
-        // line is the only thing that would explain a phone that never pairs.
-        crate::log_debug(&format!("[mobile-relay] not joining channel: {reason}"));
-        return;
+        if isolated_e2e_join_allowed() {
+            crate::log_debug("[mobile-relay] FLEET_RELAY_ISOLATED_E2E=1: joining with the isolated secret");
+        } else {
+            // Logged rather than silent: if this ever fires for a real desktop the
+            // line is the only thing that would explain a phone that never pairs.
+            crate::log_debug(&format!("[mobile-relay] not joining channel: {reason}"));
+            return;
+        }
     }
     let cfg = load_config();
     if !cfg.enabled || cfg.secret.is_empty() {
@@ -5603,6 +5629,15 @@ mod tests {
     /// Hence two conditions, not one: `cfg!(test)` catches the first shape, and
     /// `FLEET_HOME` (set only ever by test isolation — verified across the repo)
     /// catches the second, which is a plain non-test build.
+    #[test]
+    fn isolated_e2e_join_requires_a_secret_distinct_from_the_real_one() {
+        assert!(isolated_secret_is_distinct("abc", "def"));
+        assert!(isolated_secret_is_distinct("abc", ""));
+        assert!(!isolated_secret_is_distinct("abc", "abc"));
+        assert!(!isolated_secret_is_distinct("", "def"));
+        assert!(!isolated_e2e_join_allowed(), "test builds never take the e2e opt-in");
+    }
+
     #[test]
     fn a_test_process_must_never_join_the_pairing_channel() {
         use std::ffi::OsStr;
