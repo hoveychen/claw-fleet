@@ -208,7 +208,7 @@ fn canonical_claude_model(alias: &str) -> &str {
         "haiku" => "claude-haiku-5-5",
         "sonnet" => "claude-sonnet-5-5",
         "opus" => "claude-opus-5-5",
-        "fable" => "claude-fable-5-1",
+        "fable" => "claude-fable-5-2",
         other => other,
     }
 }
@@ -325,7 +325,7 @@ mod tests {
         assert_eq!(canonical_claude_model("haiku"), "claude-haiku-5-5");
         assert_eq!(canonical_claude_model("sonnet"), "claude-sonnet-5-5");
         assert_eq!(canonical_claude_model("opus"), "claude-opus-5-5");
-        assert_eq!(canonical_claude_model("fable"), "claude-fable-5-1");
+        assert_eq!(canonical_claude_model("fable"), "claude-fable-5-2");
         assert_eq!(canonical_claude_model("claude-opus-4-6"), "claude-opus-4-6");
     }
 

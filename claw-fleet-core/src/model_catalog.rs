@@ -938,6 +938,7 @@ mod tests {
     #[test]
     fn every_selectable_model_has_a_tier() {
         for id in [
+            "claude-fable-5-2",
             "claude-fable-5-1",
             "claude-fable-5",
             "claude-opus-5-5",
@@ -1107,7 +1108,11 @@ mod tests {
         assert!(!pick(&mid, "claude-sonnet-5-5").needs_cli_upgrade);
         assert!(pick(&mid, "claude-haiku-5-5").needs_cli_upgrade, "Haiku 5.5 needs 2.1.293");
 
-        let new = picker_catalog_for(|_| true, |f| (f == "claude-code").then(|| install("2.1.293")));
+        let late = picker_catalog_for(|_| true, |f| (f == "claude-code").then(|| install("2.1.319")));
+        assert!(!pick(&late, "claude-haiku-5-5").needs_cli_upgrade);
+        assert!(pick(&late, "claude-fable-5-2").needs_cli_upgrade, "Fable 5.2 needs 2.1.321");
+
+        let new = picker_catalog_for(|_| true, |f| (f == "claude-code").then(|| install("2.1.321")));
         assert!(new[0].models.iter().all(|m| !m.needs_cli_upgrade));
 
         // An unreadable version flags nothing.
@@ -1149,6 +1154,9 @@ mod tests {
         // Haiku 5.5 is a tenth of 4.5's price, so both stay listed.
         assert!(all.contains(&"claude-haiku-5-5"));
         assert!(all.contains(&"claude-haiku-4-5-20251001"));
+        // Fable 5.2 is cheaper than 5.1 ($8/$40 vs $10/$50), so both stay listed.
+        assert!(all.contains(&"claude-fable-5-2"));
+        assert!(all.contains(&"claude-fable-5-1"));
 
         let claude = &cat[0];
         for m in &claude.models {

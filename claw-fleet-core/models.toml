@@ -61,6 +61,15 @@
 # `claude-opus-5[1m]` 命中的就是 `claude-opus-5` 这一行。
 
 [[model]]
+id = "claude-fable-5-2"
+label = "Fable 5.2"
+family = "claude-code"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+min_cli_version = "2.1.321"
+
+# 5.2 比 5.1 便宜（$8/$40 对 $10/$50），不同价就不能用 superseded_by 折进 5.2 那一行。
+[[model]]
 id = "claude-fable-5-1"
 label = "Fable 5.1"
 family = "claude-code"
