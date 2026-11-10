@@ -1,4 +1,4 @@
-import { isWebBuild } from "./hostEnv";
+import { isWebBuild, webApiOrigin } from "./hostEnv";
 
 /**
  * URL of one artifact's blob through the `fleet-artifact` custom protocol.
@@ -32,7 +32,7 @@ export function artifactBlobUrl(id: string, name: string, version?: string): str
   const pinned = version ? `version=${encodeURIComponent(version)}` : "";
   if (isWebBuild()) {
     const query = `id=${encodeURIComponent(id)}${pinned ? `&${pinned}` : ""}`;
-    return `${window.location.origin}/artifact_blob?${query}`;
+    return `${webApiOrigin()}/artifact_blob?${query}`;
   }
   const path = `${encodeURIComponent(id)}/${encodeURIComponent(name)}${pinned ? `?${pinned}` : ""}`;
   return navigator.userAgent.includes("Windows")
@@ -53,7 +53,7 @@ export function artifactBlobUrl(id: string, name: string, version?: string): str
 export function artifactPosterUrl(id: string, name: string): string | null {
   if (blobOverride?.(id)) return null;
   if (isWebBuild()) {
-    return `${window.location.origin}/artifact_blob?id=${encodeURIComponent(id)}&poster=1`;
+    return `${webApiOrigin()}/artifact_blob?id=${encodeURIComponent(id)}&poster=1`;
   }
   const path = `${encodeURIComponent(id)}/${encodeURIComponent(name)}?poster=1`;
   return navigator.userAgent.includes("Windows")

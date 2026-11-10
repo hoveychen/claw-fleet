@@ -1,4 +1,4 @@
-import { isWebBuild } from "./hostEnv";
+import { isWebBuild, webApiOrigin } from "./hostEnv";
 
 /**
  * URL of one wiki file through the `fleet-wiki` custom protocol. Built by hand:
@@ -30,7 +30,7 @@ export function wikiFileUrl(slug: string, version: string, relpath: string): str
   const path = [slug, version, ...relpath.split("/")]
     .map(encodeURIComponent)
     .join("/");
-  if (isWebBuild()) return `${window.location.origin}/wiki_asset/${path}`;
+  if (isWebBuild()) return `${webApiOrigin()}/wiki_asset/${path}`;
   return navigator.userAgent.includes("Windows")
     ? `http://fleet-wiki.localhost/${path}`
     : `fleet-wiki://localhost/${path}`;

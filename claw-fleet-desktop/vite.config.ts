@@ -67,6 +67,12 @@ export function tauriCoreProbePlugin() {
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
+  // Relative, so one dist works wherever it is mounted: Tauri and `fleet webui`
+  // serve it at the root, a relay serves it under `/desktop/`
+  // (`app/relay/tunnel.ts`). An absolute "/" would point a relay-mounted page's
+  // chunks at the relay root, which is mobile-web.
+  base: "./",
+
   plugins: [tauriCoreProbePlugin(), react()],
 
   resolve: { alias: tauriCoreProbe },

@@ -50,15 +50,108 @@ function isImmutableAsset(url) {
   return url.origin === self.location.origin && url.pathname.includes("/assets/");
 }
 
+// ── Relay tunnel ────────────────────────────────────────────────────────────
+// When this bundle is mounted on a relay origin under /desktop/, data routes
+// live under /desktop/h/… and are carried to the Mac over the relay channel
+// (see app/relay/tunnel.ts). This worker only catches the requests the browser
+// makes by itself (<img>, <iframe>, <a download>); it cannot hold the relay
+// socket (it is torn down whenever idle), so it hands each request to a window
+// that does and builds the Response from the answer. Inactive at any other
+// scope — `fleet webui` serves this same file at "/".
+
+const TUNNEL_MOUNT = "/desktop/";
+const TUNNEL_MESSAGE = "fleet-tunnel-req";
+/** Upper bound for one tunnelled request; the page side has its own timeout. */
+const TUNNEL_TIMEOUT_MS = 60000;
+
+function scopePath() {
+  try {
+    return new URL(self.registration.scope).pathname;
+  } catch {
+    return "/";
+  }
+}
+
+/** `/desktop/h/` when mounted on a relay, else null. */
+function tunnelPrefix() {
+  const scope = scopePath();
+  return scope.endsWith(TUNNEL_MOUNT) ? `${scope}h/` : null;
+}
+
+/**
+ * The window that should carry this request: a page of this app (not a
+ * document loaded *through* the tunnel, e.g. an iframe), preferring the one
+ * that made the request.
+ */
+async function pickRelayWindow(event, prefix) {
+  const scope = scopePath();
+  const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  const holders = all.filter((c) => {
+    let p;
+    try {
+      p = new URL(c.url).pathname;
+    } catch {
+      return false;
+    }
+    return p.startsWith(scope) && !p.startsWith(prefix);
+  });
+  return (
+    holders.find((c) => c.id === event.clientId) ||
+    holders.find((c) => c.focused) ||
+    holders[0] ||
+    null
+  );
+}
+
+function plainResponse(status, text) {
+  return new Response(text, { status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+}
+
+const NULL_BODY_STATUS = new Set([101, 204, 205, 304]);
+
+async function tunnel(event, prefix) {
+  const req = event.request;
+  const win = await pickRelayWindow(event, prefix);
+  if (!win) return plainResponse(503, "no Fleet window holds the relay connection");
+  const body =
+    req.method === "GET" || req.method === "HEAD" ? null : await req.arrayBuffer();
+  const answer = await new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const timer = setTimeout(() => resolve(null), TUNNEL_TIMEOUT_MS);
+    channel.port1.onmessage = (ev) => {
+      clearTimeout(timer);
+      resolve(ev.data);
+    };
+    const msg = {
+      type: TUNNEL_MESSAGE,
+      method: req.method,
+      url: req.url,
+      contentType: req.headers.get("Content-Type"),
+      body: body && body.byteLength > 0 ? body : null,
+    };
+    win.postMessage(msg, msg.body ? [channel.port2, msg.body] : [channel.port2]);
+  });
+  if (!answer) return plainResponse(504, "relay tunnel timed out");
+  const status = answer.status >= 200 && answer.status <= 599 ? answer.status : 502;
+  const headers = {};
+  if (answer.contentType) headers["Content-Type"] = answer.contentType;
+  return new Response(NULL_BODY_STATUS.has(status) ? null : answer.body, { status, headers });
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-  if (req.method !== "GET") return;
   let url;
   try {
     url = new URL(req.url);
   } catch {
     return;
   }
+  const prefix = tunnelPrefix();
+  if (prefix && url.origin === self.location.origin && url.pathname.startsWith(prefix)) {
+    event.respondWith(tunnel(event, prefix));
+    return;
+  }
+  if (req.method !== "GET") return;
   if (!isImmutableAsset(url)) return;
 
   event.respondWith(

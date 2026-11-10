@@ -78,3 +78,23 @@ function isLoopbackHostname(hostname: string): boolean {
     h === "[::1]"
   );
 }
+
+/**
+ * Path prefix the browser build's data routes sit under, on this page's
+ * origin. Empty for `fleet webui` (routes at the root); `/desktop/h` when the
+ * bundle is served from a relay and routes are tunnelled (`relay/tunnel.ts`).
+ */
+let webApiPrefix = "";
+
+/** Set once at boot by the relay transport. Nothing else may call this. */
+export function setWebApiPrefix(prefix: string): void {
+  webApiPrefix = prefix.replace(/\/$/, "");
+}
+
+/**
+ * Absolute base for asset URLs the browser loads by itself (`<img src>`,
+ * `<iframe src>`, downloads) — origin plus the route prefix.
+ */
+export function webApiOrigin(): string {
+  return `${window.location.origin}${webApiPrefix}`;
+}

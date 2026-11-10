@@ -563,7 +563,7 @@ function PrdModeCard({
  *  existing installs. The screenshot is a mock-mode capture of the real UI. */
 function NewFormCard() {
   const { t, i18n } = useTranslation();
-  const shot = i18n.language?.startsWith("zh") ? "/onboarding/home-zh.png" : "/onboarding/home-en.png";
+  const shot = i18n.language?.startsWith("zh") ? `${import.meta.env.BASE_URL}onboarding/home-zh.png` : `${import.meta.env.BASE_URL}onboarding/home-en.png`;
   return (
     <div className={`${styles.card} ${styles.card_info}`}>
       <div className={styles.card_header}>
@@ -1310,7 +1310,7 @@ export function Onboarding({
       <div className={styles.overlay}>
         <div className={styles.container}>
           <div className={styles.header}>
-            <img src="/app-icon.png" className={styles.logo} alt="Claw Fleet" />
+            <img src={`${import.meta.env.BASE_URL}app-icon.png`} className={styles.logo} alt="Claw Fleet" />
             <h1 className={styles.title}>{t("onboarding.whats_new.title")}</h1>
             <p className={styles.subtitle}>{t("onboarding.whats_new.subtitle")}</p>
           </div>
@@ -1451,7 +1451,7 @@ export function Onboarding({
         ) : (
           <>
             <div className={styles.header}>
-              <img src="/app-icon.png" className={styles.logo} alt="Claw Fleet" />
+              <img src={`${import.meta.env.BASE_URL}app-icon.png`} className={styles.logo} alt="Claw Fleet" />
               <h1 className={styles.title}>{t("onboarding.welcome")}</h1>
               <p className={styles.subtitle}>{t("onboarding.subtitle")}</p>
             </div>

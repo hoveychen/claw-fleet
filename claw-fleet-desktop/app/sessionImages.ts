@@ -1,4 +1,4 @@
-import { isWebBuild } from "./hostEnv";
+import { isWebBuild, webApiOrigin } from "./hostEnv";
 
 /**
  * URL of one image a Codex session generated, through the `fleet-genimage`
@@ -29,7 +29,7 @@ export function sessionImageUrl(sessionId: string, name: string): string {
     // leaves `+` alone — the image would 404 and render blank.
     const session = encodeURIComponent(sessionId);
     const file = encodeURIComponent(name);
-    return `${window.location.origin}/session_image?session=${session}&name=${file}`;
+    return `${webApiOrigin()}/session_image?session=${session}&name=${file}`;
   }
   const joined = [sessionId, name].map(encodeURIComponent).join("/");
   return navigator.userAgent.includes("Windows")
