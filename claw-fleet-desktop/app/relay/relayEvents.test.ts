@@ -121,6 +121,11 @@ describe("sessions poll cadence", () => {
     expect(shouldPollSessions({ ...up, lastPollAt: base.now - 3_000 })).toBe(false);
     expect(shouldPollSessions({ ...up, lastPollAt: base.now - SESSIONS_POLL_STREAM_MS })).toBe(true);
   });
+  it("does not poll while pushed frames keep arriving", () => {
+    const up = { ...base, pollOnly: true, streamUp: true, lastPollAt: 0 };
+    expect(shouldPollSessions({ ...up, lastFrameAt: base.now - 5_000 })).toBe(false);
+    expect(shouldPollSessions({ ...up, lastFrameAt: base.now - SESSIONS_POLL_STREAM_MS })).toBe(true);
+  });
   it("keeps the SSE quiet-window rule for EventSource transports", () => {
     const sse = { ...base, pollOnly: false, streamUp: false };
     expect(shouldPollSessions({ ...sse, lastFrameAt: base.now - 2_000 })).toBe(false);

@@ -2285,9 +2285,14 @@ let customStreamUp = false;
 let lastPollAt = 0;
 
 /**
- * Poll cadence while a transport stream is up. Frames ride the stream, so the
- * poll is only a safety net for a silently lost frame; a quiet `since` poll
- * costs a 204, so this is about request count rather than bytes.
+ * Poll cadence while a transport stream is up: only after this long with
+ * neither a frame nor a poll. Frames ride the stream, so the poll is a safety
+ * net for a silently lost frame on a quiet board, where `since` answers 204.
+ *
+ * Not a fixed timer: `/sessions_snapshot` frames the current list before it
+ * compares `since`, so on a busy board a poll nearly always lands on a change
+ * the broadcaster has not pushed yet and comes back as the whole list —
+ * measured 2.2MB per poll over the relay on a 1,470-row fleet.
  */
 export const SESSIONS_POLL_STREAM_MS = 30_000;
 
@@ -2299,7 +2304,7 @@ export function shouldPollSessions(s: {
   lastFrameAt: number;
   lastPollAt: number;
 }): boolean {
-  if (s.streamUp) return s.now - s.lastPollAt >= SESSIONS_POLL_STREAM_MS;
+  if (s.streamUp) return s.now - Math.max(s.lastPollAt, s.lastFrameAt) >= SESSIONS_POLL_STREAM_MS;
   if (s.pollOnly) return true;
   return s.now - s.lastFrameAt >= SESSIONS_POLL_QUIET_MS;
 }
