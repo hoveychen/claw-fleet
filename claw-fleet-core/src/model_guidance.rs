@@ -155,6 +155,7 @@ mod tests {
             assert!(g.contains("gpt-6.2-sol"), "{locale} must list GPT-6.2 Sol");
             assert!(g.contains("gpt-6.2-astra"), "{locale} must list GPT-6.2 Astra");
             assert!(g.contains("gpt-6.1-sol"), "{locale} must list GPT-6.1 Sol");
+            assert!(g.contains("gpt-6.1-terra"), "{locale} must list GPT-6.1 Terra");
             assert!(g.contains("gpt-6-astra"), "{locale} must list GPT-6 Astra");
             assert!(g.contains("gpt-6-sol"), "{locale} must list GPT-6 Sol");
             assert!(g.contains("gpt-6-luna"), "{locale} must list GPT-6 Luna");

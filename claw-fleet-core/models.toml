@@ -256,6 +256,21 @@ context = 500000
 max_context = 872000
 min_cli_version = "0.159.0"
 
+# GPT-6.1 Terra: ladder, default and windows from `codex debug models` on
+# client 0.170.0 (2026-11-18), priority 4; the server first lists it for
+# 0.159.0 (0.158.0: absent). Pricing page: $1 / $0.05 cached / $5. Standard
+# tier, like gpt-5.6-terra.
+[[model]]
+id = "gpt-6.1-terra"
+label = "GPT-6.1 Terra"
+family = "codex"
+tier = "standard"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+default_effort = "low"
+context = 500000
+max_context = 872000
+min_cli_version = "0.159.0"
+
 [[model]]
 id = "gpt-6-astra"
 label = "GPT-6 Astra"
