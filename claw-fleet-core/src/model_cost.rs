@@ -231,6 +231,18 @@ pub const COST_GPT_ASTRA: ModelCosts = ModelCosts {
     web_search: 0.0,
 };
 
+// gpt-6.2-astra: $8 / $40 per Mtok, cached input $0.40, cache writes $10
+// (verified 2026-11-18) — cheaper than gpt-6-astra, so it must be matched
+// before the generic "astra" branch.
+pub const COST_GPT62_ASTRA: ModelCosts = ModelCosts {
+    input: 8.0,
+    output: 40.0,
+    cache_write: 10.0,
+    cache_write_1h: 10.0,
+    cache_read: 0.40,
+    web_search: 0.0,
+};
+
 // gpt-6-sol: $2 / $10 per Mtok — cheaper than gpt-5.6-sol, so it must not
 // fall through to the 5.6 Sol tier just because both names contain "sol".
 pub const COST_GPT6_SOL: ModelCosts = ModelCosts {
@@ -336,12 +348,16 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
     // conservative, most-expensive gpt-5.6 tier) so an unrecognised gpt
     // model never silently prices below what it likely costs.
     if m.contains("gpt") || m.contains("codex") {
+        if m.contains("gpt-6.2") && m.contains("astra") {
+            return COST_GPT62_ASTRA;
+        }
         if m.contains("astra") {
             return COST_GPT_ASTRA;
         }
         // GPT-6 Sol / Luna share their tier names with 5.6 but not its
         // prices, so the generation has to be decided before the name.
-        if m.contains("gpt-6.1") && m.contains("sol") {
+        // gpt-6.2-sol is priced exactly like gpt-6.1-sol (verified 2026-11-18).
+        if (m.contains("gpt-6.1") || m.contains("gpt-6.2")) && m.contains("sol") {
             return COST_GPT61_SOL;
         }
         if m.contains("gpt-6") {
@@ -974,6 +990,28 @@ mod tests {
             ..Default::default()
         };
         assert!((flat_turn_cost_usd("GPT-6-Astra", &usage) - 61.0).abs() < 1e-9);
+    }
+
+    /// GPT-6.2 Astra is cheaper than 6 Astra and must not fall into its tier
+    /// via the "astra" substring; 6.2 Sol is priced like 6.1 Sol.
+    #[test]
+    fn gpt_6_2_pricing() {
+        let costs = get_model_costs("gpt-6.2-astra");
+        assert_eq!(costs.input, 8.0);
+        assert_eq!(costs.cache_read, 0.40);
+        assert_eq!(costs.cache_write, 10.0);
+        assert_eq!(costs.output, 40.0);
+
+        let usage = TurnUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            cache_read_tokens: 1_000_000,
+            ..Default::default()
+        };
+        // $8 + $40 + $0.40.
+        assert!((flat_turn_cost_usd("GPT-6.2-Astra", &usage) - 48.40).abs() < 1e-9);
+        // $2 + $10 + $0.10.
+        assert!((flat_turn_cost_usd("gpt-6.2-sol", &usage) - 12.10).abs() < 1e-9);
     }
 
     #[test]

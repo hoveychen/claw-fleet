@@ -3642,7 +3642,9 @@ mod tests {
     #[test]
     fn context_window_catalogued_codex_slugs() {
         assert_eq!(context_window_for_model("gpt-6.1-sol", 0), Some(500_000));
+        assert_eq!(context_window_for_model("gpt-6.2-sol", 0), Some(500_000));
         for model in [
+            "gpt-6.2-astra",
             "gpt-6-astra",
             "gpt-6-sol",
             "gpt-6-luna",
