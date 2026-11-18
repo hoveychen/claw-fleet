@@ -152,6 +152,8 @@ mod tests {
                 "{locale} must list Haiku 4.5"
             );
             // Codex family model IDs
+            assert!(g.contains("gpt-6.2-sol"), "{locale} must list GPT-6.2 Sol");
+            assert!(g.contains("gpt-6.2-astra"), "{locale} must list GPT-6.2 Astra");
             assert!(g.contains("gpt-6.1-sol"), "{locale} must list GPT-6.1 Sol");
             assert!(g.contains("gpt-6-astra"), "{locale} must list GPT-6 Astra");
             assert!(g.contains("gpt-6-sol"), "{locale} must list GPT-6 Sol");

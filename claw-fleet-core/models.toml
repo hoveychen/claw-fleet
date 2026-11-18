@@ -206,6 +206,36 @@ listed = false
 # label 用带版本号的全名（"GPT-5.6 Sol" 而非 "Sol"）：它同时是桌面与移动端模型
 # 下拉里的那行字，光写 "Sol" 在下拉里认不出是哪一代。
 
+# GPT-6.2 Sol / Astra: ladders, defaults and windows from `codex debug models`
+# on client 0.170.0 (2026-11-18), where Codex ranks them priority 1 and 2. The
+# server first lists both for 0.166.0 (0.165.0 and earlier: absent).
+# Pricing page (2026-11-18): 6.2 Sol $2 / $0.10 cached / $10, the same as 6.1
+# Sol; 6.2 Astra $8 / $0.40 / $40, cheaper than 6 Astra's $10 / $1 / $50.
+# Neither supersedes its predecessor: 6.1 Sol's long-context waiver under a
+# ChatGPT login is not announced for 6.2 Sol, and 6.2 Astra is cheaper than 6
+# Astra, so a "same price" fold would be false for both.
+[[model]]
+id = "gpt-6.2-sol"
+label = "GPT-6.2 Sol"
+family = "codex"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+default_effort = "medium"
+context = 500000
+max_context = 872000
+min_cli_version = "0.166.0"
+
+[[model]]
+id = "gpt-6.2-astra"
+label = "GPT-6.2 Astra"
+family = "codex"
+tier = "premium"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+default_effort = "low"
+context = 272000
+max_context = 872000
+min_cli_version = "0.166.0"
+
 # GPT-6.1 Sol: ladder, default and windows from `codex debug models` on client
 # 0.159.2 (2026-09-30), where Codex ranks it priority 0. The server first lists
 # it for 0.159.0 (0.158.0 and earlier: absent); on 0.156.0 a turn fails with
