@@ -286,6 +286,18 @@ pub const COST_GPT_SOL: ModelCosts = ModelCosts {
     web_search: 0.0,
 };
 
+// gpt-6.1-terra: $1 / $5 per Mtok, cached input $0.05 (verified
+// 2026-11-18) — half of gpt-5.6-terra, so the generation is checked before
+// the generic "terra" branch.
+pub const COST_GPT61_TERRA: ModelCosts = ModelCosts {
+    input: 1.0,
+    output: 5.0,
+    cache_write: 1.25,
+    cache_write_1h: 1.25,
+    cache_read: 0.05,
+    web_search: 0.0,
+};
+
 // gpt-5.6-terra: $2 / $12 per Mtok (was $2.50 / $15).
 pub const COST_GPT_TERRA: ModelCosts = ModelCosts {
     input: 2.0,
@@ -361,6 +373,9 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
             return COST_GPT61_SOL;
         }
         if m.contains("gpt-6") {
+            if m.contains("terra") {
+                return COST_GPT61_TERRA;
+            }
             if m.contains("luna") {
                 return COST_GPT6_LUNA;
             }
@@ -1012,6 +1027,8 @@ mod tests {
         assert!((flat_turn_cost_usd("GPT-6.2-Astra", &usage) - 48.40).abs() < 1e-9);
         // $2 + $10 + $0.10.
         assert!((flat_turn_cost_usd("gpt-6.2-sol", &usage) - 12.10).abs() < 1e-9);
+        // 6.1 Terra must not fall into 5.6 Terra's tier: $1 + $5 + $0.05.
+        assert!((flat_turn_cost_usd("gpt-6.1-terra", &usage) - 6.05).abs() < 1e-9);
     }
 
     #[test]
