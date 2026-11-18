@@ -3,6 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 
 import {
   EXPLAIN_MARK_SELECT_EVENT,
+  cloneSelectionRange,
+  holdSelectionHighlight,
   readAssistantSelection,
   type AssistantSelection,
 } from "../../../shared-ts/sessionExplain";
@@ -68,6 +70,15 @@ export function SelectionAskBar({
   // The preset just tapped: the bar stays up with a spinner on that button
   // until the parent's submit settles (`busy` drops), then goes away.
   const [firing, setFiring] = useState<ExplainPreset | null>(null);
+  // The passage's range, snapshotted with `shown`. A tap on the bar or the
+  // custom input's focus collapses the real selection; this is painted in its
+  // place so the reader still sees what the question is about.
+  const rangeRef = useRef<Range | null>(null);
+
+  useEffect(() => {
+    holdSelectionHighlight(shown && (custom || firing) ? rangeRef.current : null);
+  }, [shown, custom, firing]);
+  useEffect(() => () => holdSelectionHighlight(null), []);
 
   useEffect(() => {
     if (!enabled) {
@@ -87,6 +98,7 @@ export function SelectionAskBar({
       const sel = readAssistantSelection(root);
       if (sel) {
         cancelHide();
+        rangeRef.current = cloneSelectionRange();
         setShown({ sel, rect: sel.rect });
         if (!customRef.current) setQuestion("");
         return;

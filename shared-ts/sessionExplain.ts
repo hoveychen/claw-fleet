@@ -396,6 +396,36 @@ export function selectQuoteIn(el: HTMLElement, quote: string): boolean {
   return true;
 }
 
+/** CSS Custom Highlight name painted over a passage the ask bar is about while
+ *  the document selection itself is gone. Styled by `::highlight(explain-held)`
+ *  in the desktop's App.css and mobile-web's index.css. */
+export const EXPLAIN_HELD_HIGHLIGHT = "explain-held";
+
+/** A copy of the current selection's range, kept so the passage can be painted
+ *  after the selection collapses. `null` when there is no selection. */
+export function cloneSelectionRange(
+  sel: Selection | null = typeof window === "undefined" ? null : window.getSelection(),
+): Range | null {
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  return sel.getRangeAt(0).cloneRange();
+}
+
+/**
+ * Paint `range` as a stand-in selection, or clear the paint with `null`.
+ *
+ * Focusing the custom-question input (and, on a phone, tapping any button)
+ * collapses the document selection, which left the reader unable to tell what
+ * the question was going to be about. The highlight does not touch the DOM, so
+ * the markdown rendering is undisturbed. A no-op where the Highlight API is
+ * missing.
+ */
+export function holdSelectionHighlight(range: Range | null): void {
+  if (typeof CSS === "undefined" || !CSS.highlights || typeof Highlight === "undefined") return;
+  const reg = CSS.highlights as unknown as Map<string, Highlight>;
+  if (range) reg.set(EXPLAIN_HELD_HIGHLIGHT, new Highlight(range));
+  else reg.delete(EXPLAIN_HELD_HIGHLIGHT);
+}
+
 /**
  * Scroll the transcript row a side question was asked about into view and
  * flash it. The uuid is the durable key; the index is the fallback for a

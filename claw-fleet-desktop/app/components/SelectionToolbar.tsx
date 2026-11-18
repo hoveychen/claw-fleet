@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import type { ExplainPreset } from "../explainApi";
 import {
   EXPLAIN_MARK_SELECT_EVENT,
+  cloneSelectionRange,
+  holdSelectionHighlight,
   readAssistantSelection,
   type AssistantSelection,
 } from "../selectionExplain";
@@ -88,6 +90,14 @@ export function SelectionToolbar({
   customRef.current = custom;
   const inputRef = useRef<HTMLInputElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  // The passage's range, snapshotted with `shown`, so it can be painted once
+  // the custom input's focus has collapsed the real selection.
+  const rangeRef = useRef<Range | null>(null);
+
+  useEffect(() => {
+    holdSelectionHighlight(shown && custom ? rangeRef.current : null);
+  }, [shown, custom]);
+  useEffect(() => () => holdSelectionHighlight(null), []);
 
   useEffect(() => {
     if (!enabled) {
@@ -104,6 +114,7 @@ export function SelectionToolbar({
         return;
       }
       const hostRect = host.getBoundingClientRect();
+      rangeRef.current = cloneSelectionRange();
       setCustom(false);
       setQuestion("");
       setShown({

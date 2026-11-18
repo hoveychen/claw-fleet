@@ -224,3 +224,11 @@ pre {
 .cjk-indent {
   text-indent: 2em;
 }
+
+/* The passage the selection ask bar is about, held after a tap on the bar or
+   the custom-question input's focus collapsed the real selection
+   (SelectionAskBar). Selection-blue so it reads as "still selected". */
+::highlight(explain-held) {
+  background-color: rgba(64, 132, 255, 0.38);
+  color: inherit;
+}

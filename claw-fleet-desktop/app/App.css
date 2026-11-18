@@ -613,6 +613,13 @@ html.os-windows::-webkit-scrollbar-thumb:hover,
   background-color: #facc15;
   color: #000;
 }
+/* The passage the selection ask bar is about, held after the custom-question
+   input's focus collapsed the real selection (SelectionToolbar). Selection-blue
+   so it reads as "still selected". */
+::highlight(explain-held) {
+  background-color: rgba(64, 132, 255, 0.38);
+  color: inherit;
+}
 
 /* ── Print: only the reader goes on the page ─────────────────────────────────
    `print_webview` prints the whole webview, so an unconstrained print would ink
