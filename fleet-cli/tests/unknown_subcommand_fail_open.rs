@@ -23,14 +23,12 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+/// Cargo exports the built binary path to integration tests. Deriving it from
+/// `current_exe()` broke on rustc 1.100, which moved test binaries out of
+/// `target/<profile>/deps/` into `target/<profile>/build/<pkg>/<hash>/out/`.
 fn bin_path(name: &str) -> PathBuf {
-    let mut p = std::env::current_exe().unwrap();
-    p.pop(); // drop test exe name
-    if p.ends_with("deps") {
-        p.pop();
-    }
-    p.push(name);
-    p
+    assert_eq!(name, "fleet-cli", "only the fleet-cli binary is exported here");
+    PathBuf::from(env!("CARGO_BIN_EXE_fleet-cli"))
 }
 
 /// Subcommands no build will ever have — stand-ins for "a subcommand added
