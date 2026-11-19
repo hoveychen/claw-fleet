@@ -60,7 +60,7 @@ import type {
   WikiDoc,
 } from "../types";
 import { canResumeSession, canEnqueueSession } from "../types";
-import { detailPathForSession } from "../agentSource";
+import { detailPathForSession, tailCursorRotated } from "../agentSource";
 import { ResumeComposer } from "./Composer";
 import {
   basename,
@@ -1900,7 +1900,7 @@ export function SessionDetailView({
             offset: offsetRef.current,
           });
           if (!cancelled) {
-            if (d.newOffset < offsetRef.current) {
+            if (tailCursorRotated(session.agentSource, offsetRef.current, d.newOffset)) {
               offsetRef.current = null; // rotated/truncated → re-bootstrap
             } else {
               offsetRef.current = d.newOffset;
@@ -1950,7 +1950,7 @@ export function SessionDetailView({
       document.removeEventListener("visibilitychange", onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, session.jsonlPath, tailN, pane]);
+  }, [client, session.jsonlPath, session.agentSource, tailN, pane]);
 
   // ── Live thinking polling (only while the turn looks in progress) ─────
   useEffect(() => {

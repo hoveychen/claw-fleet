@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_TOOL_CHOICES,
   detailPathForSession,
+  tailCursorIsOpaque,
+  tailCursorRotated,
   tokenRequestFor,
   toolChoicesForSources,
   toolForAgentSource,
@@ -91,5 +93,27 @@ describe("agy (Antigravity CLI, Beta)", () => {
     expect(catalogHarnessFor("dsh")).toBe("claude");
     expect(toolTakesPermissionMode("agy")).toBe(false);
     expect(toolTakesPermissionMode("claude")).toBe(true);
+  });
+});
+
+describe("tailCursorRotated", () => {
+  it("dsh / agy 的游标是指纹 hash,变小不算轮转,不重拉全量", () => {
+    expect(tailCursorIsOpaque("dsh")).toBe(true);
+    expect(tailCursorIsOpaque("agy")).toBe(true);
+    expect(tailCursorRotated("dsh", 9_000_000_000_000, 12)).toBe(false);
+    expect(tailCursorRotated("agy", 9_000_000_000_000, 12)).toBe(false);
+  });
+
+  it("claude / codex 的游标是字节偏移,变小即轮转", () => {
+    expect(tailCursorIsOpaque("claude-code")).toBe(false);
+    expect(tailCursorIsOpaque("codex")).toBe(false);
+    expect(tailCursorRotated("claude-code", 4096, 100)).toBe(true);
+    expect(tailCursorRotated("codex", 4096, 100)).toBe(true);
+    expect(tailCursorRotated(undefined, 4096, 100)).toBe(true);
+  });
+
+  it("偏移不变或增长都不是轮转", () => {
+    expect(tailCursorRotated("claude-code", 4096, 4096)).toBe(false);
+    expect(tailCursorRotated("claude-code", 4096, 8192)).toBe(false);
   });
 });

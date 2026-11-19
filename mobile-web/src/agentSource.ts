@@ -90,3 +90,25 @@ export function tokenRequestFor(session: {
     params: { path: session.jsonlPath, projectRoot: session.workspacePath },
   };
 }
+
+/** Whether a session's `tail_delta` cursor is an opaque token rather than a
+ *  byte offset. dsh and agy have no transcript file, so the desktop reports a
+ *  fingerprint hash of the current tail window (`window_fingerprint` in
+ *  claw-fleet-core): it changes whenever the session does, but its numeric
+ *  order means nothing. File-backed sources (Claude, codex) report the file
+ *  size, which only shrinks when the file was rotated or truncated. */
+export function tailCursorIsOpaque(agentSource: string | undefined | null): boolean {
+  const tool = toolForAgentSource(agentSource);
+  return tool === "dsh" || tool === "agy";
+}
+
+/** Should a live follower drop its cursor and re-bootstrap with a full tail?
+ *  Only a byte offset that went backwards signals rotation; for an opaque
+ *  cursor a smaller value is just another fingerprint. */
+export function tailCursorRotated(
+  agentSource: string | undefined | null,
+  prev: number,
+  next: number,
+): boolean {
+  return !tailCursorIsOpaque(agentSource) && next < prev;
+}
