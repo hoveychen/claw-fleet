@@ -2217,7 +2217,8 @@
     "source_name": {
       "claude-code": "Claude Code",
       "codex": "Codex",
-      "dsh": "DeepSeek Harness"
+      "dsh": "DeepSeek Harness",
+      "agy": "Antigravity CLI (Beta)"
     },
     "claude_binary": "Claude location",
     "claude_binary_desc": "Fleet finds Claude on your computer automatically — you usually don't need to change this. Pick one manually only if you want a specific version.",

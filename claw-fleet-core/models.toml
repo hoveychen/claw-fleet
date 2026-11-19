@@ -12,7 +12,7 @@
 # ── 字段 ──
 #   id             模型 id。Claude 与 Codex 用裸 id；dsh 用 `provider/model` 全称。
 #   label          速查表里显示的名字（"Fable 5.1" / "Sol"）。
-#   family         claude-code | codex | dsh。留空则由 id 形状推断
+#   family         claude-code | codex | dsh | agy。留空则由 id 形状推断
 #                  （见 agent_source::source_for_model）。
 #   tier           fast | standard | premium。跨 harness 换算同档模型时用。
 #   efforts        该模型接受的 effort，**从弱到强**排列。顺序是有意义的：
@@ -466,3 +466,102 @@ context = 1000000
 superseded_by = "deepseek-official/deepseek-flash"
 legacy_note_zh = "退役别名，请求由 V4.1 Flash 承接"
 legacy_note_en = "retired alias, served by V4.1 Flash"
+
+# ── agy (Antigravity CLI) ───────────────────────────────────────────────────
+# agy is Google's coding CLI for personal subscriptions (AI Pro / Ultra). The
+# ids and labels below are the gemini-* lines of `agy models` on agy 1.5.12
+# (2026-11-19), copied verbatim; that command lists models even when the
+# account fails the eligibility check.
+#
+# Effort is part of the id (`-high` / `-low`), so no `efforts` are written: the
+# picker offers only "default" and never stacks an `--effort` on top. No `tier`
+# either — Google publishes none for Neon / Argon / Hydrogen, and a guessed tier
+# would make cross-harness mapping pick the wrong peer model.
+#
+# agy also serves claude-opus-5-5-* / claude-sonnet-5-5-* / gpt-oss-120b-medium.
+# Those are not catalogued here: bare, they route to Claude Code / Codex by
+# shape; reaching them through agy takes `agy:<id>` (agent_source::source_for_model).
+#
+# Phase 1 keeps agy OUT of the guidance model sheet (render_sheet's harness list
+# omits it): Fleet cannot read agy session bodies yet, so agents should not be
+# steered into delegating work there.
+
+[[model]]
+id = "gemini-4-neon-high"
+label = "Gemini 4 Neon (High)"
+family = "agy"
+
+[[model]]
+id = "gemini-4-neon-xhigh"
+label = "Gemini 4 Neon (XHigh)"
+family = "agy"
+
+[[model]]
+id = "gemini-4-neon-medium"
+label = "Gemini 4 Neon (Medium)"
+family = "agy"
+
+[[model]]
+id = "gemini-4-neon-low"
+label = "Gemini 4 Neon (Low)"
+family = "agy"
+
+[[model]]
+id = "gemini-4-argon-medium"
+label = "Gemini 4 Argon (Medium)"
+family = "agy"
+
+[[model]]
+id = "gemini-4-argon-high"
+label = "Gemini 4 Argon (High)"
+family = "agy"
+
+[[model]]
+id = "gemini-4-argon-low"
+label = "Gemini 4 Argon (Low)"
+family = "agy"
+
+[[model]]
+id = "gemini-4-hydrogen-high"
+label = "Gemini 4 Hydrogen (High)"
+family = "agy"
+
+[[model]]
+id = "gemini-4-hydrogen-xhigh"
+label = "Gemini 4 Hydrogen (XHigh)"
+family = "agy"
+
+[[model]]
+id = "gemini-4-hydrogen-medium"
+label = "Gemini 4 Hydrogen (Medium)"
+family = "agy"
+
+[[model]]
+id = "gemini-4-hydrogen-low"
+label = "Gemini 4 Hydrogen (Low)"
+family = "agy"
+
+[[model]]
+id = "gemini-pro-orchestrator-neon"
+label = "Orchestrator (Neon)"
+family = "agy"
+
+[[model]]
+id = "gemini-pro-orchestrator-g1-pro"
+label = "Orchestrator (Argon)"
+family = "agy"
+
+[[model]]
+id = "gemini-3.8-flash-high"
+label = "Gemini 3.8 Flash (High)"
+family = "agy"
+
+[[model]]
+id = "gemini-3.8-flash-medium"
+label = "Gemini 3.8 Flash (Medium)"
+family = "agy"
+
+[[model]]
+id = "gemini-3.8-flash-low"
+label = "Gemini 3.8 Flash (Low)"
+family = "agy"

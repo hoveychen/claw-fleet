@@ -161,6 +161,9 @@ export function AgentSourceIcon({ source }: { source: string }) {
       return <CodexIcon />;
     case "dsh":
       return <DshIcon />;
+    // agy (Antigravity CLI) runs Google's Gemini models; the Gemini mark is
+    // the closest official logo shipped here.
+    case "agy":
     case "gemini":
       return <GeminiIcon />;
     case "copilot":

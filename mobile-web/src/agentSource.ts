@@ -17,7 +17,21 @@ export const AGENT_TOOL_CHOICES: Array<[string, string]> = [
   ["claude", "Claude"],
   ["codex", "Codex"],
   ["dsh", "DeepSeek Harness"],
+  // Antigravity CLI, shipped as Beta: sessions list and launch, bodies are not
+  // readable yet.
+  ["agy", "Antigravity (Beta)"],
 ];
+
+/** The `model_catalog` harness whose rows feed a tool's flat model/effort
+ *  menus: codex and agy have their own rows, everything else uses Claude's. */
+export function catalogHarnessFor(tool: string): string {
+  return tool === "codex" || tool === "agy" ? tool : "claude";
+}
+
+/** Tools that take Claude's `--permission-mode`. */
+export function toolTakesPermissionMode(tool: string): boolean {
+  return tool !== "codex" && tool !== "dsh" && tool !== "agy";
+}
 
 /** Source registration name → launcher tool value. */
 function sourceNameToTool(name: string): string {

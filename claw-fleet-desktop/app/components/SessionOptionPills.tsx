@@ -72,6 +72,9 @@ export function SessionOptionPills({
   const { t } = useTranslation();
   const isCodex = tool === "codex";
   const isDsh = tool === "dsh";
+  // The `model_catalog` harness whose rows feed the flat model/effort menus.
+  // agy has its own rows (gemini-* ids); everything unrecognised is Claude.
+  const catalogHarness = isCodex ? "codex" : tool === "agy" ? "agy" : "claude";
   // Fleet's own model catalog (models.toml) — one source for both the model and
   // the effort menus, replacing the two lists this file used to hardcode.
   // `catalogLoaded` settles on failure too, so an IPC error ends the loading
@@ -163,8 +166,8 @@ export function SessionOptionPills({
     if (isDsh) return [];
     return isCodex
       ? [...modelChoicesFor(catalog, "codex"), ...codexProfileChoices(codexProfiles)]
-      : modelChoicesFor(catalog, "claude");
-  }, [isCodex, isDsh, codexProfiles, catalog]);
+      : modelChoicesFor(catalog, catalogHarness);
+  }, [isCodex, isDsh, codexProfiles, catalog, catalogHarness]);
   // dsh publishes the ladder per model, so the effort menu follows the current
   // pick rather than a fixed table. A model with no reasoning control offers
   // nothing but "default" — the honest rendering of "this model has no effort
@@ -182,7 +185,7 @@ export function SessionOptionPills({
   // A model the installed CLI is too old for stays pickable — the API may well
   // accept the id — but the menu says which CLI it needs and how to get there,
   // and the pill keeps saying so after the pick.
-  const cliHint = isDsh ? null : cliUpgradeFor(catalog, isCodex ? "codex" : "claude");
+  const cliHint = isDsh ? null : cliUpgradeFor(catalog, catalogHarness);
   const pickedChoice = modelChoices.find((m) => m.value === model);
   const pickedNeedsCli = !!(cliHint && pickedChoice?.needsCliUpgrade);
   const outdatedModels = cliHint ? modelChoices.filter((m) => m.needsCliUpgrade) : [];
@@ -201,7 +204,7 @@ export function SessionOptionPills({
     : "";
   const effortChoices = isDsh
     ? (dshLadderPick?.efforts ?? [])
-    : effortChoicesFor(catalog, isCodex ? "codex" : "claude", model);
+    : effortChoicesFor(catalog, catalogHarness, model);
   // A stale effort is cleared when the picked model does not accept it. Only
   // meaningful once the catalog has loaded: with an empty catalog every level
   // looks unsupported, and clearing on that would wipe a deliberate choice.
@@ -388,7 +391,7 @@ export function SessionOptionPills({
           switch (`setApprovalPolicy` and friends answer "not found" — probed
           live). So the permission pill is Claude-only. Hosts with no permission
           concept (e.g. schedule edit) hide it outright. */}
-      {showPermission && !isCodex && !isDsh && (
+      {showPermission && !isCodex && !isDsh && tool !== "agy" && (
         <PillMenu
           placement={placement}
           label={permissionLabel}

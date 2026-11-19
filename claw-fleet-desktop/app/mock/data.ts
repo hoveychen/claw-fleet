@@ -3256,6 +3256,8 @@ export const MOCK_SOURCES_CONFIG = [
   // disabled or missing, which is what keeps it out on a real machine with no
   // dsh installed.
   { name: "dsh", enabled: true, available: true },
+  // agy (Antigravity CLI, Beta) so the launcher's tool pill offers it.
+  { name: "agy", enabled: true, available: true },
 ];
 
 // ── dsh model catalogue ─────────────────────────────────────────────────────
@@ -3292,7 +3294,7 @@ function m(
   id: string,
   label: string,
   harness: string,
-  tier: string,
+  tier: string | null,
   efforts: string[],
   defaultEffort: string | null = null,
   minCliVersion: string | null = null,
@@ -3385,6 +3387,32 @@ export const MOCK_MODEL_CATALOG = withCliFlags([
       // V4.1 Flash and is retiring V4 Pro into it too, so `models.toml` marks
       // all three unlisted and the picker offers exactly this one.
       m("deepseek-official/deepseek-flash", "DeepSeek V4.1 Flash 1017", "dsh", "standard", DSH_LADDER, "high"),
+    ],
+  },
+  {
+    name: "agy",
+    available: true,
+    cliVersion: null,
+    upgradeCommand: null,
+    models: [
+      // The gemini-* lines of `agy models` (agy 1.5.12). Effort is baked into
+      // the id and no tier is published, hence the null tier and empty ladder.
+      m("gemini-4-neon-high", "Gemini 4 Neon (High)", "agy", null, []),
+      m("gemini-4-neon-xhigh", "Gemini 4 Neon (XHigh)", "agy", null, []),
+      m("gemini-4-neon-medium", "Gemini 4 Neon (Medium)", "agy", null, []),
+      m("gemini-4-neon-low", "Gemini 4 Neon (Low)", "agy", null, []),
+      m("gemini-4-argon-medium", "Gemini 4 Argon (Medium)", "agy", null, []),
+      m("gemini-4-argon-high", "Gemini 4 Argon (High)", "agy", null, []),
+      m("gemini-4-argon-low", "Gemini 4 Argon (Low)", "agy", null, []),
+      m("gemini-4-hydrogen-high", "Gemini 4 Hydrogen (High)", "agy", null, []),
+      m("gemini-4-hydrogen-xhigh", "Gemini 4 Hydrogen (XHigh)", "agy", null, []),
+      m("gemini-4-hydrogen-medium", "Gemini 4 Hydrogen (Medium)", "agy", null, []),
+      m("gemini-4-hydrogen-low", "Gemini 4 Hydrogen (Low)", "agy", null, []),
+      m("gemini-pro-orchestrator-neon", "Orchestrator (Neon)", "agy", null, []),
+      m("gemini-pro-orchestrator-g1-pro", "Orchestrator (Argon)", "agy", null, []),
+      m("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)", "agy", null, []),
+      m("gemini-3.8-flash-medium", "Gemini 3.8 Flash (Medium)", "agy", null, []),
+      m("gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)", "agy", null, []),
     ],
   },
 ]);

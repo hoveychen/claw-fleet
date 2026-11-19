@@ -40,7 +40,8 @@ struct MockRow {
     id: String,
     label: String,
     harness: String,
-    tier: String,
+    /// `None` for a mock row written with a `null` tier (agy publishes none).
+    tier: Option<String>,
     efforts: Vec<String>,
     default_effort: Option<String>,
     min_cli_version: Option<String>,
@@ -212,7 +213,7 @@ fn parse_mock(src: &str) -> Vec<(String, Vec<MockRow>)> {
             id: unquote(&args[0]),
             label: unquote(&args[1]),
             harness: unquote(&args[2]),
-            tier: unquote(&args[3]),
+            tier: Some(unquote(&args[3])).filter(|s| s != "null"),
             efforts,
             default_effort: args.get(5).map(|s| unquote(s)).filter(|s| s != "null"),
             min_cli_version: args.get(6).map(|s| unquote(s)).filter(|s| s != "null"),
@@ -265,7 +266,7 @@ fn mock_model_catalog_matches_the_real_picker_catalog() {
         for (r, m) in rows.iter().zip(h.models.iter()) {
             assert_eq!(r.label, m.label, "drift-guard: {} label", r.id);
             assert_eq!(r.harness, m.harness, "drift-guard: {} harness", r.id);
-            assert_eq!(Some(r.tier.clone()), m.tier, "drift-guard: {} tier", r.id);
+            assert_eq!(r.tier, m.tier, "drift-guard: {} tier", r.id);
             assert_eq!(
                 r.efforts, m.efforts,
                 "drift-guard: {} effort ladder — these differ within a harness, so a \
