@@ -152,11 +152,18 @@ pub trait AgentSource: Send + Sync {
     /// byte slice of such a rollout is not a message, so appending it renders
     /// nothing. The override returns freshly *normalized* messages carrying the
     /// stable per-message `uuid` the clients dedup on.
+    ///
+    /// Sources with no Fleet-readable file (`resolve_file_path` → `None`, e.g.
+    /// dsh) get the window model instead: the offset is a fingerprint of the
+    /// last [`FILELESS_TAIL_WINDOW`] messages, and any change re-sends that
+    /// window for the client to dedup by `uuid`.
     fn tail_incremental(&self, path: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
         use std::io::{Read as _, Seek as _};
-        let real = self
-            .resolve_file_path(path)
-            .ok_or_else(|| format!("cannot resolve path: {path}"))?;
+        let Some(real) = self.resolve_file_path(path) else {
+            let window = self.get_messages_tail(path, FILELESS_TAIL_WINDOW)?;
+            let fp = window_fingerprint(&window);
+            return Ok(if fp == offset { (Vec::new(), fp) } else { (window, fp) });
+        };
         let size = std::fs::metadata(&real).map_err(|e| e.to_string())?.len();
         // Truncated/rotated file (offset past EOF) or no growth: resync, no lines.
         if offset >= size {
@@ -182,6 +189,18 @@ pub trait AgentSource: Send + Sync {
         // without this it renders as a raw user bubble until the view reloads.
         lines.iter_mut().for_each(crate::fleet_event::annotate);
         Ok((lines, offset + consumed as u64))
+    }
+
+    /// The cursor a live follower starts from: the value a later
+    /// [`Self::tail_incremental`] call takes as `offset` and that returns
+    /// nothing until the session changes. For file-backed sources that is the
+    /// file size; sources with no file report the current fingerprint of their
+    /// own `tail_incremental` model, so they never need a real path.
+    fn tail_cursor(&self, path: &str) -> Result<u64, String> {
+        match self.resolve_file_path(path) {
+            Some(real) => Ok(std::fs::metadata(&real).map_err(|e| e.to_string())?.len()),
+            None => self.tail_incremental(path, 0).map(|(_, cursor)| cursor),
+        }
     }
 
     /// How this source should be watched for changes.
@@ -1029,6 +1048,27 @@ pub fn interrupt_session_at(path: &str) -> Result<(), String> {
     let source = find_source_for_path(&sources, path)
         .ok_or_else(|| format!("no agent source owns {path}"))?;
     source.interrupt_session(path)
+}
+
+/// Trailing messages re-sent by the default `tail_incremental` of a source
+/// with no file on disk whenever that window changes.
+pub const FILELESS_TAIL_WINDOW: usize = 60;
+
+/// Keep tail cursors inside JavaScript's exact-integer range: every client
+/// parses `newOffset` as a JS number and echoes it back, so a full 64-bit
+/// hash would come back rounded and never match again.
+pub const JS_SAFE_CURSOR_MASK: u64 = (1 << 53) - 1;
+
+/// Change fingerprint of a message window, as a non-zero JS-safe cursor
+/// (zero stays free to mean "no cursor yet").
+pub fn window_fingerprint(window: &[Value]) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    window.len().hash(&mut h);
+    for msg in window {
+        msg.to_string().hash(&mut h);
+    }
+    (h.finish() & JS_SAFE_CURSOR_MASK) | 1
 }
 
 pub fn find_source_for_path<'a>(

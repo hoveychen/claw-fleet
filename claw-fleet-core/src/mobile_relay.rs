@@ -3220,10 +3220,11 @@ fn serve_tail(params: &Value) -> Result<Value, String> {
     Ok(Value::Array(slim))
 }
 
-// Byte-offset incremental tail (mirrors the `/tail` endpoint): the
-// client polls with its last `newOffset` and receives only the lines
-// appended since. Omitting `offset` locates the current end without
-// reading the body — the cheap "start following from here" call.
+// Incremental tail (mirrors the `/tail` endpoint): the client polls with
+// its last `newOffset` and receives only what changed since. The cursor is
+// source-defined — a byte offset for file-backed transcripts, a change
+// fingerprint for sources without a file (agy, dsh). Omitting `offset`
+// returns the current cursor with no body — "start following from here".
 fn serve_tail_delta(params: &Value) -> Result<Value, String> {
     let path = params
         .get("path")
@@ -3232,16 +3233,21 @@ fn serve_tail_delta(params: &Value) -> Result<Value, String> {
     let sources = crate::agent_source::build_sources();
     let source = crate::agent_source::find_source_for_path(&sources, path)
         .ok_or_else(|| format!("no agent source for path: {path}"))?;
-    let resolved = source
-        .resolve_file_path(path)
-        .ok_or_else(|| format!("cannot resolve path: {path}"))?;
-    let size = std::fs::metadata(&resolved)
-        .map_err(|e| e.to_string())?
-        .len();
+    tail_delta_from(source, path, params)
+}
+
+fn tail_delta_from(
+    source: &dyn crate::agent_source::AgentSource,
+    path: &str,
+    params: &Value,
+) -> Result<Value, String> {
     let offset = params.get("offset").and_then(Value::as_u64);
     let Some(offset) = offset else {
         // Bootstrap: locate the current end so the client follows from here.
-        return Ok(json!({ "lines": [], "newOffset": size }));
+        // The source picks the cursor — a byte size for file-backed sources, a
+        // change fingerprint for those with no file (agy, dsh) — so a session
+        // with no transcript file no longer fails here.
+        return Ok(json!({ "lines": [], "newOffset": source.tail_cursor(path)? }));
     };
     // Source-aware incremental follow: Claude gets the byte-offset raw tail
     // (each jsonl line is a self-contained message); Codex re-normalizes the
@@ -5063,6 +5069,77 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
 mod tests {
     use super::*;
     use crate::session::fleet_home_lock;
+
+    // ── tail_delta for sources with no transcript file (agy, dsh) ───────────
+
+    /// A source with no file on disk: only the trait defaults for
+    /// `tail_incremental` / `tail_cursor` stand behind it.
+    struct FilelessSource(std::sync::Mutex<Vec<Value>>);
+
+    impl crate::agent_source::AgentSource for FilelessSource {
+        fn name(&self) -> &'static str {
+            "fileless"
+        }
+        fn uri_prefix(&self) -> &'static str {
+            "fileless://"
+        }
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn scan_sessions(&self) -> Vec<crate::session::SessionInfo> {
+            Vec::new()
+        }
+        fn get_messages(&self, _path: &str) -> Result<Vec<Value>, String> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+        fn watch_strategy(&self) -> crate::agent_source::WatchStrategy {
+            crate::agent_source::WatchStrategy::Poll(std::time::Duration::from_secs(5))
+        }
+        fn resolve_file_path(&self, _path: &str) -> Option<std::path::PathBuf> {
+            None
+        }
+    }
+
+    #[test]
+    fn tail_delta_follows_a_source_without_a_file() {
+        let src = FilelessSource(std::sync::Mutex::new(vec![
+            json!({"uuid": "u1", "type": "user", "message": {"content": "hi"}}),
+        ]));
+        let path = "fileless://s1";
+
+        // Bootstrap (no offset): a cursor, not "cannot resolve path".
+        let boot = tail_delta_from(&src, path, &json!({ "path": path })).unwrap();
+        assert_eq!(boot["lines"], json!([]));
+        let cursor = boot["newOffset"].as_u64().expect("numeric cursor");
+        assert!(cursor > 0 && cursor < (1u64 << 53), "cursor must be JS-safe: {cursor}");
+
+        // Nothing changed: an empty delta at the same cursor.
+        let idle =
+            tail_delta_from(&src, path, &json!({ "path": path, "offset": cursor })).unwrap();
+        assert_eq!(idle["lines"], json!([]));
+        assert_eq!(idle["newOffset"].as_u64(), Some(cursor));
+
+        // Growth: the window comes back (clients dedup by uuid) with a new cursor.
+        src.0.lock().unwrap().push(
+            json!({"uuid": "u2", "type": "assistant", "message": {"content": "hello"}}),
+        );
+        let grown =
+            tail_delta_from(&src, path, &json!({ "path": path, "offset": cursor })).unwrap();
+        let uuids: Vec<&str> = grown["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["uuid"].as_str())
+            .collect();
+        assert!(uuids.contains(&"u2"), "new message must be delivered: {grown}");
+        let next = grown["newOffset"].as_u64().unwrap();
+        assert_ne!(next, cursor);
+
+        // And it settles again at the new cursor.
+        let settled =
+            tail_delta_from(&src, path, &json!({ "path": path, "offset": next })).unwrap();
+        assert_eq!(settled["lines"], json!([]));
+    }
 
     // ── write idempotency keys (resume_session / enqueue_message) ───────────
 
