@@ -1209,11 +1209,10 @@ use fleet_image::{
     downscale_decision_asset, downscale_image, DECISION_ASSET_HARD_CAP_BYTES,
     DECISION_ASSET_MIN_DIM, DECISION_ASSET_TARGET_BYTES,
 };
-/// Most-recently-active sessions kept in the mobile snapshot. Sized comfortably
-/// above the number of Fleet-owned sessions a busy workspace accumulates inside
-/// the scanner's 7-day window, so the cap never crops the task list the mobile
-/// client would otherwise render (fields are whitelisted + previews truncated,
-/// so even 500 rows stay a small payload).
+/// Most-recently-active sessions of *closed* tasks kept in the mobile snapshot.
+/// Sessions of open tasks are always sent and are not counted against it (see
+/// [`slim_sessions_snapshot`]): a busy host passes 500 Fleet-owned sessions
+/// inside the scanner's 7-day window in about two days.
 const SNAPSHOT_MAX_SESSIONS: usize = 500;
 /// Subagent rows ride along only for this many most-recent main sessions. They
 /// are uncapped otherwise and scale with history, not with what is live: on
@@ -1233,6 +1232,38 @@ const SNAPSHOT_PREVIEW_CHARS: usize = 160;
 /// cap first let external VS Code / bare-CLI sessions occupy slots that the
 /// client then discarded, cropping the visible task list below the cap and
 /// making the count diverge from the desktop's.
+/// The task a main session belongs to, keyed the way the phone groups rows
+/// (`mobile-web/src/taskRows.ts`): a sub-task joins its parent's `taskId`, a
+/// main hop uses its own `taskId`, and payload rows without one fall back to
+/// the relay chain, then the session id.
+fn snapshot_task_key(s: &Value) -> &str {
+    let str_of = |k: &str| s.get(k).and_then(Value::as_str).filter(|v| !v.is_empty());
+    if let Some(p) = str_of("parentTaskId") {
+        return p;
+    }
+    if let Some(t) = str_of("taskId") {
+        return t;
+    }
+    let chain = s.get("handoff").filter(|h| {
+        h.get("chainLen").and_then(Value::as_u64).unwrap_or(0) > 1
+    });
+    if let Some(c) = chain.and_then(|h| h.get("chainId")).and_then(Value::as_str) {
+        return c;
+    }
+    s.get("id").and_then(Value::as_str).unwrap_or("")
+}
+
+/// Tasks the boss has closed: any main-conversation hop (not a sub-task, whose
+/// own outcome does not close the parent) carries a `taskOutcome`.
+fn closed_task_keys<'a>(mains: &[&'a Value]) -> std::collections::HashSet<&'a str> {
+    mains
+        .iter()
+        .filter(|s| s.get("parentTaskId").and_then(Value::as_str).is_none_or(str::is_empty))
+        .filter(|s| s.get("taskOutcome").and_then(Value::as_str).is_some())
+        .map(|s| snapshot_task_key(s))
+        .collect()
+}
+
 pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
     let Some(list) = sessions.as_array() else {
         return Value::Array(Vec::new());
@@ -1257,7 +1288,20 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
     mains.sort_by_key(|s| {
         std::cmp::Reverse(s.get("lastActivityMs").and_then(Value::as_u64).unwrap_or(0))
     });
-    mains.truncate(SNAPSHOT_MAX_SESSIONS);
+    // The cap applies to closed tasks only. A task the boss has not accepted or
+    // abandoned (ready-to-accept, waiting, needs-you) is something the phone
+    // must show however long it has been idle; on 2026-11-19 this host had
+    // 1396 Fleet-owned mains in the scanner window, the 500th was 47h old, and
+    // two 4-day-old ready-to-accept tasks were missing from the phone.
+    let closed = closed_task_keys(&mains);
+    let (open, done): (Vec<&Value>, Vec<&Value>) = mains
+        .into_iter()
+        .partition(|s| !closed.contains(snapshot_task_key(s)));
+    let room = SNAPSHOT_MAX_SESSIONS.saturating_sub(open.len());
+    let mut mains: Vec<&Value> = open.into_iter().chain(done.into_iter().take(room)).collect();
+    mains.sort_by_key(|s| {
+        std::cmp::Reverse(s.get("lastActivityMs").and_then(Value::as_u64).unwrap_or(0))
+    });
 
     // Append subagent rows whose parent is among the most recent
     // [`SNAPSHOT_SUBAGENT_PARENTS`] kept mains, so the phone can drill into them
@@ -7027,6 +7071,49 @@ mod tests {
     }
 
     #[test]
+    fn slim_snapshot_cap_never_drops_open_tasks() {
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+        let n = SNAPSHOT_MAX_SESSIONS as u64 + 10;
+        // Newer closed tasks that alone overflow the cap.
+        let mut rows: Vec<Value> = (0..n)
+            .map(|i| {
+                json!({
+                    "id": format!("done-{i}"), "taskId": format!("done-{i}"),
+                    "isSubagent": false, "lastActivityMs": 1_000 + i,
+                    "taskOutcome": "completed", "entrypoint": NEW_SESSION_ENTRYPOINT
+                })
+            })
+            .collect();
+        // An old open task: two relay hops plus a sub-task (whose own outcome
+        // does not close the parent), and an old hop of a closed task.
+        rows.push(json!({"id": "open-1", "taskId": "open", "isSubagent": false,
+            "lastActivityMs": 1, "entrypoint": NEW_SESSION_ENTRYPOINT}));
+        rows.push(json!({"id": "open-2", "taskId": "open", "isSubagent": false,
+            "lastActivityMs": 2, "entrypoint": NEW_SESSION_ENTRYPOINT}));
+        rows.push(json!({"id": "open-sub", "taskId": "open-sub", "parentTaskId": "open",
+            "isSubagent": false, "lastActivityMs": 3, "taskOutcome": "completed",
+            "entrypoint": NEW_SESSION_ENTRYPOINT}));
+        rows.push(json!({"id": "old-done", "taskId": "old-done", "isSubagent": false,
+            "lastActivityMs": 4, "taskOutcome": "abandoned",
+            "entrypoint": NEW_SESSION_ENTRYPOINT}));
+        let slim = slim_sessions_snapshot(&Value::Array(rows));
+        let ids: Vec<&str> = slim
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap())
+            .collect();
+        for id in ["open-1", "open-2", "open-sub"] {
+            assert!(ids.contains(&id), "open task row {id} was cropped");
+        }
+        assert!(!ids.contains(&"old-done"), "closed tasks must still be capped");
+        assert_eq!(ids.len(), SNAPSHOT_MAX_SESSIONS);
+        // Still most-recent first.
+        assert_eq!(ids[0], format!("done-{}", n - 1));
+        assert_eq!(*ids.last().unwrap(), "open-1");
+    }
+
+    #[test]
     fn slim_snapshot_filters_and_whitelists() {
         use crate::session_launch::NEW_SESSION_ENTRYPOINT;
         let sessions = json!([
@@ -7243,10 +7330,12 @@ mod tests {
             .map(|i| {
                 json!({
                     "id": format!("s{i}"), "isSubagent": false, "lastActivityMs": i,
-                    "entrypoint": NEW_SESSION_ENTRYPOINT
+                    "taskOutcome": "completed", "entrypoint": NEW_SESSION_ENTRYPOINT
                 })
             })
             .collect();
+        // The cap applies to closed tasks; open ones are covered by
+        // `slim_snapshot_cap_never_drops_open_tasks`.
         let slim = slim_sessions_snapshot(&Value::Array(many));
         let list = slim.as_array().unwrap();
         assert_eq!(list.len(), SNAPSHOT_MAX_SESSIONS);
