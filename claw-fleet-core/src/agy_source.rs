@@ -276,6 +276,12 @@ pub struct RunMeta {
     pub conversation_id: Option<String>,
     pub ended_ms: Option<u64>,
     pub exit_code: Option<i32>,
+    /// The Fleet entrypoint the turn was started under (`claw-fleet-newsession`,
+    /// …). Copied onto the row so clients' Fleet-owned filters (the task page,
+    /// the phone's only list) include agy sessions Fleet started. `None` for a
+    /// resume of a conversation the user opened in agy by hand.
+    #[serde(default)]
+    pub entrypoint: Option<String>,
 }
 
 /// What agy's stream-json said about a turn.
@@ -542,6 +548,12 @@ fn overlay_runs(s: &mut SessionInfo, runs: &[&RunRecord], is_alive: &impl Fn(u32
         return;
     };
     s.fleet_spawned = true;
+    if s.entrypoint.is_none() {
+        s.entrypoint = runs
+            .iter()
+            .min_by_key(|r| r.meta.started_ms)
+            .and_then(|r| r.meta.entrypoint.clone());
+    }
     if s.model.is_none() {
         s.model = runs.iter().rev().find_map(|r| r.meta.model.clone());
     }
@@ -688,6 +700,7 @@ struct Launch<'a> {
     model: Option<&'a str>,
     effort: Option<&'a str>,
     conversation: Option<&'a str>,
+    entrypoint: Option<&'a str>,
 }
 
 /// Start one headless agy turn. Returns the pid and the session key the turn
@@ -723,6 +736,7 @@ fn launch(
         conversation_id: l.conversation.map(str::to_string),
         ended_ms: None,
         exit_code: None,
+        entrypoint: l.entrypoint.map(str::to_string),
     };
     write_meta(&dir, &meta)?;
     let out_path = dir.join(format!("{run_id}.out"));
@@ -908,6 +922,7 @@ impl AgentSource for AgySource {
                 model: spec.model.as_deref(),
                 effort: spec.effort.as_deref(),
                 conversation: None,
+                entrypoint: Some(spec.entrypoint.as_str()).filter(|e| !e.is_empty()),
             },
             Box::new(|_| {}),
         )
@@ -930,6 +945,11 @@ impl AgentSource for AgySource {
                 model: spec.model.as_deref(),
                 effort: spec.effort.as_deref(),
                 conversation,
+                // A retried refusal is a new Fleet-started conversation; a
+                // resume keeps whatever the conversation already was.
+                entrypoint: conversation
+                    .is_none()
+                    .then_some(crate::session_launch::NEW_SESSION_ENTRYPOINT),
             },
             on_exit,
         )
@@ -1041,7 +1061,8 @@ mod tests {
 
     #[test]
     fn a_refused_launch_is_listed_with_the_raw_error() {
-        let r = run("r1", 1_000, INELIGIBLE);
+        let mut r = run("r1", 1_000, INELIGIBLE);
+        r.meta.entrypoint = Some(crate::session_launch::NEW_SESSION_ENTRYPOINT.into());
         assert_eq!(r.conversation_id(), None);
         let sessions = build_sessions(&[], None, &[r.clone()], |_| false);
         assert_eq!(sessions.len(), 1);
@@ -1053,6 +1074,8 @@ mod tests {
         assert!(preview.contains("Eligibility check failed"), "{preview}");
         assert_eq!(s.model.as_deref(), Some("gemini-4-neon-high"));
         assert_eq!(s.ai_title.as_deref(), Some("say hi"));
+        // Without the Fleet entrypoint the task page (and the phone) hide it.
+        assert_eq!(s.entrypoint.as_deref(), Some("claw-fleet-newsession"));
 
         let msgs = detail_messages("agy-run-r1", &[r]);
         let text = serde_json::to_string(&msgs).unwrap();
@@ -1128,6 +1151,10 @@ mod tests {
         let runs = load_runs(tmp.path());
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].meta.exit_code, Some(1));
+        // Records written before `entrypoint` existed still load.
+        let legacy = r#"{"runId":"r5","kind":"new","workspace":"/w","prompt":"p","startedMs":1}"#;
+        let m: RunMeta = serde_json::from_str(legacy).unwrap();
+        assert_eq!(m.entrypoint, None);
         assert_eq!(runs[0].stderr_tail.as_deref(), Some("boom"));
         assert!(runs[0].outcome.failed());
     }
