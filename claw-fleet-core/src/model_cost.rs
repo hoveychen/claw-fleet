@@ -724,6 +724,23 @@ pub fn agy_generation_cost_usd(
     None
 }
 
+/// Reference $/M rates shown beside an agy receipt line: today's Gemini
+/// price, the Claude list for `claude-*`, all-zero for an unpriced model.
+pub fn agy_reference_costs(model: &str) -> ModelCosts {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    if let Some(c) = gemini_costs(model, now) {
+        return c;
+    }
+    let id = agy_model_id(model);
+    if id.starts_with("claude-") {
+        return get_model_costs(&id);
+    }
+    gemini(0.0, 0.0, 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

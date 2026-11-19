@@ -17,8 +17,8 @@ export const AGENT_TOOL_CHOICES: Array<[string, string]> = [
   ["claude", "Claude"],
   ["codex", "Codex"],
   ["dsh", "DeepSeek Harness"],
-  // Antigravity CLI, shipped as Beta: sessions list and launch, bodies are not
-  // readable yet.
+  // Antigravity CLI, shipped as Beta: body decoding is not yet validated
+  // against a real account.
   ["agy", "Antigravity (Beta)"],
 ];
 
