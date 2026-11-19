@@ -265,6 +265,9 @@ export const AGENT_TOOL_CHOICES: { value: string; label: string }[] = [
   // `agent_source::build_sources`), which is what keeps it out of the launcher
   // on a machine with no dsh installed.
   { value: "dsh", label: "DeepSeek Harness" },
+  // Antigravity CLI — shipped as Beta: sessions are listed and launched, but
+  // their bodies are not readable yet. Gated like dsh on the binary existing.
+  { value: "agy", label: "Antigravity (Beta)" },
 ];
 
 /** A source entry as returned by the `get_sources_config` backend command. */

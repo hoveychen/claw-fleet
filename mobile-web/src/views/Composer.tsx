@@ -32,7 +32,12 @@ import { waitForSessionId } from "../spawnConfirm";
 import { isSessionLive, type SessionInfo } from "../types";
 import { useChatWorkspaceState } from "../useChatWorkspace";
 import { useSourcesConfig } from "../useSourcesConfig";
-import { toolChoicesForSources, toolForAgentSource } from "../agentSource";
+import {
+  catalogHarnessFor,
+  toolChoicesForSources,
+  toolForAgentSource,
+  toolTakesPermissionMode,
+} from "../agentSource";
 import { dshEffortsFor, dshLadderSpec, dshModelGroups, useDshModelsState } from "../dshModels";
 import { codexProfileChoices, useCodexProfiles } from "../useCodexProfiles";
 import {
@@ -158,7 +163,7 @@ export function resumeConfigChips({
   const chips = [
     [modelLabel || copy.defaultModel, effortLabel].filter(Boolean).join(" · "),
   ];
-  if (tool !== "codex" && tool !== "dsh") chips.push(permissionLabel || copy.defaultPermission);
+  if (toolTakesPermissionMode(tool)) chips.push(permissionLabel || copy.defaultPermission);
   return chips;
 }
 
@@ -488,7 +493,7 @@ function OptionSelects({
         ...modelChoicesFor(catalog, "codex", t("默认模型")),
         ...codexProfileChoices(codexProfiles),
       ]
-    : modelChoicesFor(catalog, "claude", t("默认模型"));
+    : modelChoicesFor(catalog, catalogHarnessFor(tool), t("默认模型"));
   // dsh efforts are **per-model** — Claude's fixed ladder doesn't apply to it.
   // When catalog hasn't arrived or the model has no reasoning controls, only
   // "default" remains — an honest degradation: the session runs on the host's
@@ -503,11 +508,11 @@ function OptionSelects({
       ]
     : isCodex
       ? effortChoicesFor(catalog, "codex", model, t("默认努力度"))
-      : effortChoicesFor(catalog, "claude", model, t("默认努力度"));
+      : effortChoicesFor(catalog, catalogHarnessFor(tool), model, t("默认努力度"));
   // A model the installed CLI predates stays selectable (the API may accept the
   // id), but each such option says which CLI it needs and the picked one gets a
   // warning line with the upgrade.
-  const harness = isCodex ? "codex" : "claude";
+  const harness = catalogHarnessFor(tool);
   const optionFloor = (v: string) => (isDsh ? null : cliFloorFor(catalog, harness, v));
   const pickedFloor = optionFloor(model);
   const toolName = isCodex ? "Codex" : "Claude";
@@ -578,7 +583,7 @@ function OptionSelects({
           ))}
         </select>
       </label>
-      {!isCodex && !isDsh && (
+      {toolTakesPermissionMode(tool) && (
         <label className={styles.optionField}>
           <span>{t("权限")}</span>
           <select
@@ -1010,7 +1015,7 @@ export function NewSessionSheet({
   const sheetCatalogLoading = !!client && !sheetCatalogLoaded;
   const chipLabelLoading = !!model && tool !== "dsh" && sheetCatalogLoading;
   const modelLabel = model
-    ? (modelChoicesFor(sheetCatalog, tool === "codex" ? "codex" : "claude", "").find(
+    ? (modelChoicesFor(sheetCatalog, catalogHarnessFor(tool), "").find(
         ([value]) => value === model,
       )?.[1] ?? model)
     : "";
@@ -1572,7 +1577,7 @@ export function ResumeComposer({
   const modelChipLoading = !!model && tool !== "dsh" && resumeCatalogLoading;
   const modelLabel = useMemo(() => {
     if (tool === "dsh") return model;
-    const table = modelChoicesFor(resumeCatalog, tool === "codex" ? "codex" : "claude", "");
+    const table = modelChoicesFor(resumeCatalog, catalogHarnessFor(tool), "");
     const hit = table.find(([v]) => v === model);
     return hit ? hit[1] : model;
   }, [tool, model, resumeCatalog]);

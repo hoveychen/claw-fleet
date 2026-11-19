@@ -3,6 +3,7 @@ pub mod acp;
 pub mod agent_loop;
 pub mod agent_slots;
 pub mod agent_source;
+pub mod agy_source;
 pub mod artifacts;
 pub mod ask_definition;
 pub mod ask_preempt;

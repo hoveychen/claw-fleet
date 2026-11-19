@@ -159,6 +159,17 @@ describe("agentToolsForSources", () => {
       agentToolsForSources([src("claude-code"), src("dsh", false)]).map((t) => t.value),
     ).toEqual(["claude"]);
   });
+
+  it("offers agy as a Beta tool once its source is enabled and available", () => {
+    const tools = agentToolsForSources([src("claude-code"), src("agy")]);
+    expect(tools.map((t) => t.value)).toEqual(["claude", "agy"]);
+    expect(tools[1].label).toContain("Beta");
+    expect(agentToolsForSources([src("claude-code"), src("agy", false)]).map((t) => t.value)).toEqual([
+      "claude",
+    ]);
+    // An agy session's resume composer offers agy's own model rows.
+    expect(toolForAgentSource("agy")).toBe("agy");
+  });
 });
 
 describe("toolForAgentSource", () => {

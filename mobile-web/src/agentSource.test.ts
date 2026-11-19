@@ -78,3 +78,18 @@ describe("detailPathForSession", () => {
     expect(detailPathForSession(undefined, "/x/s.jsonl")).toBe("/x/s.jsonl");
   });
 });
+
+describe("agy (Antigravity CLI, Beta)", () => {
+  const on = (name: string) => ({ name, enabled: true, available: true });
+  it("is offered as a Beta tool and uses its own catalog rows, without permission modes", async () => {
+    const { catalogHarnessFor, toolTakesPermissionMode } = await import("./agentSource");
+    const tools = toolChoicesForSources([on("claude-code"), on("agy")]);
+    expect(tools.map(([v]) => v)).toEqual(["claude", "agy"]);
+    expect(tools[1][1]).toContain("Beta");
+    expect(toolForAgentSource("agy")).toBe("agy");
+    expect(catalogHarnessFor("agy")).toBe("agy");
+    expect(catalogHarnessFor("dsh")).toBe("claude");
+    expect(toolTakesPermissionMode("agy")).toBe(false);
+    expect(toolTakesPermissionMode("claude")).toBe(true);
+  });
+});

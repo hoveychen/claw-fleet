@@ -424,7 +424,9 @@ pub fn picker_catalog_for(
     is_available: impl Fn(&str) -> bool,
     cli_install: impl Fn(&str) -> Option<crate::harness_status::CliInstall>,
 ) -> Vec<PickerHarness> {
-    ["claude-code", "codex", "dsh"]
+    // agy is offered to the pickers but deliberately not to `render_sheet`
+    // (see the agy section of models.toml).
+    ["claude-code", "codex", "dsh", "agy"]
         .into_iter()
         .map(|family| {
             let install = cli_install(family);
@@ -1074,14 +1076,29 @@ mod tests {
     /// use, but a picker may want to show the harness greyed out with a reason
     /// rather than have it silently vanish. Sending the flag lets each client
     /// decide; sending nothing would not.
+    /// agy is pickable but stays out of the guidance sheet in phase 1: Fleet
+    /// cannot read agy session bodies, so agents must not be steered there.
+    #[test]
+    fn the_sheet_never_lists_agy_models() {
+        for locale in ["zh", "en"] {
+            let sheet = render_sheet_with(locale, |_| true);
+            assert!(!sheet.contains("gemini-"), "{locale} sheet lists an agy model");
+        }
+    }
+
     #[test]
     fn picker_catalog_reports_availability_per_harness() {
         let cat = picker_catalog_with(|f| f == "claude-code");
         let names: Vec<&str> = cat.iter().map(|h| h.name.as_str()).collect();
-        assert_eq!(names, ["claude", "codex", "dsh"]);
+        assert_eq!(names, ["claude", "codex", "dsh", "agy"]);
         assert!(cat[0].available);
         assert!(!cat[1].available);
         assert!(!cat[2].available);
+        assert!(!cat[3].available);
+        assert!(
+            cat[3].models.iter().all(|m| m.id.starts_with("gemini-") && m.efforts.is_empty()),
+            "agy lists only gemini ids, with the effort baked into the id"
+        );
         // Models are listed regardless of availability — the flag is the signal.
         assert!(!cat[1].models.is_empty(), "codex models still enumerated");
     }

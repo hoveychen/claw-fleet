@@ -466,6 +466,8 @@ pub fn get_sources_config_local() -> Vec<SourceInfo> {
         // the row's "not detected" label and the actual scan decision from ever
         // disagreeing.
         ("dsh", crate::dsh_server::is_available()),
+        // Antigravity CLI. Same availability probe `build_sources` gates on.
+        ("agy", crate::agy_source::is_available()),
     ];
 
     all_sources
@@ -504,6 +506,12 @@ pub fn build_sources() -> Vec<Box<dyn AgentSource>> {
     // log. The other two sources read files and degrade to an empty list.
     if config.is_enabled("dsh") && crate::dsh_server::is_available() {
         sources.push(Box::new(crate::dsh_source::DshSource::new()));
+    }
+
+    // Antigravity CLI (agy). Gated on the binary or its data dir existing, so a
+    // machine without agy never shows an empty source in the launcher.
+    if config.is_enabled("agy") && crate::agy_source::is_available() {
+        sources.push(Box::new(crate::agy_source::AgySource::new()));
     }
 
     sources
@@ -808,8 +816,11 @@ pub(crate) fn normalize_tool(tool: &str) -> &str {
 ///   (`dsh_source::split_model`; e.g. `openrouter/anthropic/claude-opus-5`).
 /// - `claude…` / a bare Claude alias, optionally with a `[1m]` context suffix.
 /// - `gpt…` — Codex's own catalog (`gpt-6-astra`, `gpt-5.6-sol`, …).
+/// - `agy:<id>` — any id served by the Antigravity CLI, and bare `gemini-…`
+///   (Gemini models are only reachable through agy). agy also serves
+///   `claude-*` / `gpt-oss-*` ids; bare, those keep their own harness.
 ///
-/// Returns config/`agent_source` names ("claude-code" / "codex" / "dsh").
+/// Returns config/`agent_source` names ("claude-code" / "codex" / "dsh" / "agy").
 /// `None` means "not recognisable" — a third-party id served through a Codex
 /// provider block, say — and callers must then keep whatever source they
 /// already had rather than guess.
@@ -820,6 +831,11 @@ pub fn source_for_model(model: &str) -> Option<&'static str> {
     }
     if m.starts_with("profile:") {
         return Some("codex");
+    }
+    // Before the Claude/Codex shapes: agy also serves `claude-*` and `gpt-oss-*`
+    // ids, which only reach agy when written with the explicit `agy:` prefix.
+    if crate::agy_source::is_agy_model(m) {
+        return Some(crate::agy_source::SOURCE_NAME);
     }
     if m.contains('/') {
         return Some("dsh");
@@ -1112,6 +1128,38 @@ mod tests {
         for m in ["", "   ", "my-finetune-v3"] {
             assert_eq!(source_for_model(m), None, "{m}");
         }
+    }
+
+    /// agy serves Gemini, Claude and GPT-OSS ids. Bare `gemini-*` can only mean
+    /// agy; bare `claude-*` / `gpt-*` keep their own harness, so reaching those
+    /// through agy needs the explicit `agy:` prefix (ids from `agy models`).
+    #[test]
+    fn agy_routing_needs_the_prefix_except_for_gemini() {
+        for m in [
+            "gemini-4-neon-high",
+            "gemini-3.8-flash-low",
+            "Gemini-4-Argon-Medium",
+            "gemini-pro-orchestrator-neon",
+            "agy:gemini-4-neon-high",
+            "agy:claude-opus-5-5-high",
+            "agy:gpt-oss-120b-medium",
+        ] {
+            assert_eq!(source_for_model(m), Some("agy"), "{m}");
+        }
+        assert_eq!(source_for_model("claude-opus-5-5-high"), Some("claude-code"));
+        assert_eq!(source_for_model("claude-sonnet-5-5"), Some("claude-code"));
+        assert_eq!(source_for_model("gpt-oss-120b-medium"), Some("codex"));
+        assert_eq!(source_for_model("gpt-6.2-sol"), Some("codex"));
+
+        let route = route_launch_with(
+            &ctx("claude-code", "claude-opus-5", "xhigh"),
+            Some("agy:claude-opus-5-5-high"),
+            None,
+            all_available,
+        )
+        .unwrap();
+        assert_eq!(route.agent_source, "agy");
+        assert_eq!(route.switched_from.as_deref(), Some("claude-code"));
     }
 
     /// The bug this routing exists for: a Claude session naming a Codex model
