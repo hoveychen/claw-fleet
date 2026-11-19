@@ -426,7 +426,8 @@ pub(crate) fn route_reconcile_codex_guidance(
             );
             let claude =
                 crate::claude_launch::reconcile_guidance(&req_body.user_title, &req_body.locale);
-            match codex.and(dsh).and(claude) {
+            let agy = crate::agy_hooks::reconcile();
+            match codex.and(dsh).and(claude).and(agy) {
                 Ok(()) => {
                     let _ = request.respond(
                         tiny_http::Response::from_string(r#"{"ok":true}"#).with_header(json_header),

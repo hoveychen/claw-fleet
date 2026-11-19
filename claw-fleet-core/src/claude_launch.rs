@@ -254,6 +254,22 @@ fn system_prompt_text(
     (!text.is_empty()).then_some(text)
 }
 
+/// The guidance Fleet hands a non-Claude harness that has no carrier of its
+/// own yet (agy's `SessionStart` hook): lessons, then every concept switched on
+/// in [`crate::control_plane_prefs`]. The text is the Claude rendering — agy's
+/// tool names differ, so this is a first cut, not a tuned agy edition.
+pub fn render_harness_guidance() -> Option<String> {
+    let lessons = if is_enabled(Feature::Lessons) {
+        crate::lessons_store::managed_file_content().unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let (title, locale) = guidance_voice();
+    let guidance = render_guidance_with(&title, &locale, false, None, is_enabled);
+    let text = join_sections(vec![lessons, guidance]);
+    (!text.is_empty()).then_some(text)
+}
+
 /// An incognito session's system prompt: the incognito block first, then only
 /// the guidance that points at nothing outside this session — the card rules
 /// (or the sub-task rules), the model sheet and the title rule. Lessons, PRD

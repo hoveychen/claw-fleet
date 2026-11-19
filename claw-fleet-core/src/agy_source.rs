@@ -1010,6 +1010,7 @@ fn launch(
         .stdout(std::process::Stdio::from(stdout))
         .stderr(std::process::Stdio::from(stderr));
     crate::process_util::detach_process_group(&mut cmd);
+    apply_launch_env(&mut cmd, &run_id, l.conversation);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -1068,6 +1069,81 @@ fn launch(
     })
 }
 
+/// Identity env for a Fleet-launched agy process. Inherited session ids are
+/// cleared first (the spawner may itself be a Fleet session, and its id would
+/// otherwise win in [`crate::codex_launch::resolve_fleet_session_id_from_env`]
+/// inside agy's MCP children). The run id is always set — the conversation id
+/// of a new turn does not exist yet — and a resume also carries the
+/// conversation as `FLEET_SESSION_ID`.
+fn apply_launch_env(cmd: &mut std::process::Command, run_id: &str, conversation: Option<&str>) {
+    cmd.env_remove("FLEET_SESSION_ID");
+    cmd.env_remove("CLAUDE_CODE_SESSION_ID");
+    cmd.env(crate::agy_hooks::RUN_ENV, run_id);
+    cmd.env("FLEET_AGENT_SOURCE", SOURCE_NAME);
+    if let Some(c) = conversation.map(str::trim).filter(|c| !c.is_empty()) {
+        cmd.env("FLEET_SESSION_ID", c);
+    }
+}
+
+/// Every Fleet run record on this machine, oldest first.
+pub fn runs() -> Option<Vec<RunRecord>> {
+    runs_dir().map(|d| load_runs(&d))
+}
+
+/// The session a Fleet-launched agy process belongs to, from the run id Fleet
+/// put in its env: the conversation once agy has named it, the run's own key
+/// before that. `None` for an unknown run.
+pub fn session_id_for_run(run_id: &str) -> Option<String> {
+    if run_id.is_empty() || run_id.contains(['/', '\\']) || run_id.contains("..") {
+        return None;
+    }
+    let dir = runs_dir()?;
+    let meta: RunMeta =
+        serde_json::from_slice(&std::fs::read(dir.join(format!("{run_id}.json"))).ok()?).ok()?;
+    let out = std::fs::read_to_string(dir.join(format!("{run_id}.out"))).unwrap_or_default();
+    let record = RunRecord {
+        meta,
+        outcome: parse_run_output(&out),
+        stderr_tail: None,
+    };
+    Some(record.session_key())
+}
+
+/// Close out run records whose process is gone but whose end was never
+/// written. The reaper thread lives in the process that launched the turn, so a
+/// turn started by a short-lived `fleet` CLI loses its reaper the moment the CLI
+/// exits. The end time is the output file's mtime (the last thing agy wrote);
+/// the exit code is inferred from the stream — 0 for a clean `result`, 1 for a
+/// failed one, -1 when agy died without one — since the real code is
+/// unrecoverable once nobody waited on the process.
+fn settle_orphan_runs(dir: &Path, runs: &mut [RunRecord], is_alive: &impl Fn(u32) -> bool) {
+    for r in runs.iter_mut() {
+        let Some(pid) = r.meta.pid else { continue };
+        if r.meta.ended_ms.is_some() || is_alive(pid) {
+            continue;
+        }
+        let ended = mtime_ms(&dir.join(format!("{}.out", r.meta.run_id))).unwrap_or_else(now_ms);
+        let code = match &r.outcome {
+            o if o.status.is_none() => -1,
+            o if o.failed() => 1,
+            _ => 0,
+        };
+        let conv = r.outcome.conversation_id.clone();
+        update_meta(dir, &r.meta.run_id, |m| {
+            m.ended_ms.get_or_insert(ended);
+            m.exit_code.get_or_insert(code);
+            if m.conversation_id.is_none() {
+                m.conversation_id = conv.clone();
+            }
+        });
+        r.meta.ended_ms = Some(ended);
+        r.meta.exit_code = Some(code);
+        if r.meta.conversation_id.is_none() {
+            r.meta.conversation_id = conv;
+        }
+    }
+}
+
 fn read_outcome(path: &Path) -> RunOutcome {
     let Ok(f) = std::fs::File::open(path) else {
         return RunOutcome::default();
@@ -1123,7 +1199,14 @@ impl AgentSource for AgySource {
             }),
             None => Vec::new(),
         };
-        let runs = runs_dir().map(|d| load_runs(&d)).unwrap_or_default();
+        let runs = match runs_dir() {
+            Some(d) => {
+                let mut runs = load_runs(&d);
+                settle_orphan_runs(&d, &mut runs, &crate::session::is_process_alive);
+                runs
+            }
+            None => Vec::new(),
+        };
         let conversations = home.map(|h| h.join("conversations"));
         build_sessions(
             &summaries,
@@ -1260,6 +1343,77 @@ mod tests {
         assert_eq!(rows[1].title, "Fix the build");
         assert_eq!(rows[1].last_modified_ms, Some(1_795_122_845_500));
         assert_eq!(rows[1].status, "CASCADE_RUN_STATUS_IDLE");
+    }
+
+    fn orphan_meta(run_id: &str, pid: u32) -> RunMeta {
+        RunMeta {
+            run_id: run_id.to_string(),
+            kind: "new".to_string(),
+            workspace: "/w".to_string(),
+            prompt: "hi".to_string(),
+            started_ms: 1,
+            pid: Some(pid),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn orphan_runs_get_an_end_and_an_inferred_exit_code() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let cases = [
+            ("ok", 11, r#"{"type":"init","conversation_id":"c-ok"}
+{"type":"result","status":"SUCCESS","conversation_id":"c-ok","response":"done"}"#),
+            ("bad", 12, r#"{"type":"result","status":"ERROR","conversation_id":"","error":"not eligible"}"#),
+            ("died", 13, r#"{"type":"init","conversation_id":"c-died"}"#),
+            ("alive", 14, ""),
+        ];
+        for (id, pid, out) in cases {
+            write_meta(dir, &orphan_meta(id, pid)).unwrap();
+            std::fs::write(dir.join(format!("{id}.out")), out).unwrap();
+        }
+        let mut runs = load_runs(dir);
+        settle_orphan_runs(dir, &mut runs, &|pid| pid == 14);
+
+        let reloaded = load_runs(dir);
+        let by = |id: &str| reloaded.iter().find(|r| r.meta.run_id == id).unwrap().meta.clone();
+        assert_eq!(by("ok").exit_code, Some(0));
+        assert_eq!(by("ok").conversation_id.as_deref(), Some("c-ok"));
+        assert_eq!(by("bad").exit_code, Some(1));
+        assert_eq!(by("died").exit_code, Some(-1));
+        assert_eq!(by("died").conversation_id.as_deref(), Some("c-died"));
+        for id in ["ok", "bad", "died"] {
+            assert!(by(id).ended_ms.is_some(), "{id} must be closed out on disk");
+        }
+        assert_eq!(by("alive").ended_ms, None, "a live pid is left to its reaper");
+        assert!(runs.iter().all(|r| r.meta.run_id == "alive" || r.meta.ended_ms.is_some()));
+    }
+
+    #[test]
+    fn settled_runs_keep_a_reaper_written_exit_code() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let mut meta = orphan_meta("r", 21);
+        meta.ended_ms = Some(5);
+        meta.exit_code = Some(3);
+        write_meta(dir, &meta).unwrap();
+        let mut runs = load_runs(dir);
+        settle_orphan_runs(dir, &mut runs, &|_| false);
+        assert_eq!(load_runs(dir)[0].meta.exit_code, Some(3));
+    }
+
+    #[test]
+    fn launch_env_carries_the_run_and_drops_inherited_ids() {
+        let probe = "printf '%s|%s|%s' \"${FLEET_AGY_RUN:-E}\" \"${FLEET_SESSION_ID:-E}\" \"${CLAUDE_CODE_SESSION_ID:-E}\"";
+        let run = |conv: Option<&str>| {
+            let mut cmd = std::process::Command::new("/bin/sh");
+            cmd.arg("-c").arg(probe);
+            cmd.env("FLEET_SESSION_ID", "leaked").env("CLAUDE_CODE_SESSION_ID", "leaked");
+            apply_launch_env(&mut cmd, "run-1", conv);
+            String::from_utf8(cmd.output().unwrap().stdout).unwrap()
+        };
+        assert_eq!(run(None), "run-1|E|E");
+        assert_eq!(run(Some("conv-9")), "run-1|conv-9|E");
     }
 
     #[test]

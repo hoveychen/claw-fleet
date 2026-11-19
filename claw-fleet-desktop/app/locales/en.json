@@ -3037,6 +3037,7 @@
     "not_logged_in": "Not logged in",
     "managed_by_foxy": "Credentials managed by foxy",
     "dsh_byok": "No login (bring your own API key)",
+    "agy_login_unknown": "Sign in inside agy (Google account) — Fleet cannot read the login state",
     "channel_label": "Install channel",
     "channel": {
       "native-installer": "Official installer",

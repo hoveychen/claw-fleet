@@ -69,11 +69,12 @@ interface RemoteHostState {
   error: string | null;
 }
 
-const SOURCES = ["claude-code", "codex", "dsh"] as const;
+const SOURCES = ["claude-code", "codex", "dsh", "agy"] as const;
 const SOURCE_NAMES: Record<string, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   dsh: "DeepSeek Harness",
+  agy: "Antigravity (Beta)",
 };
 
 function isInstallError(e: unknown): e is InstallError {
@@ -563,6 +564,11 @@ export function EnvironmentPanel() {
           {t("env.dsh_byok")}
         </span>
       );
+    }
+    if (s.source === "agy") {
+      // agy keeps its Google sign-in somewhere Fleet does not know how to read,
+      // so the core reports `loggedIn: null` — not "logged out".
+      return <span className={styles.muted}>{t("env.agy_login_unknown")}</span>;
     }
     const managed =
       custody?.alive &&

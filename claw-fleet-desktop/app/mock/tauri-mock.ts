@@ -243,9 +243,11 @@ let mockRemoteWorkspaces: {
 ];
 
 // ── Environment wizard demo state (see the stateful cases in handleIPC) ──────
-const ENV_SOURCES = ["claude-code", "codex", "dsh"] as const;
+const ENV_SOURCES = ["claude-code", "codex", "dsh", "agy"] as const;
 type EnvSource = (typeof ENV_SOURCES)[number];
-const ENV_REMOTE_SOURCES = ENV_SOURCES;
+// agy runs locally only (rca hosts get no agy card), so the remote list stays at three.
+const ENV_REMOTE_SOURCES = ["claude-code", "codex", "dsh"] as const;
+type EnvRemoteSource = (typeof ENV_REMOTE_SOURCES)[number];
 interface MockHarness {
   installed: boolean;
   path: string | null;
@@ -274,8 +276,16 @@ const mockHarness: Record<EnvSource, MockHarness> = {
     outdated: true,
     minVersion: "0.1.5",
   },
+  agy: {
+    installed: true,
+    path: "/opt/homebrew/bin/agy",
+    version: "1.5.12",
+    channel: "homebrew",
+    loggedIn: null,
+    authDetail: null,
+  },
 };
-const mockRemoteHarness: Record<EnvSource, MockHarness> = {
+const mockRemoteHarness: Record<EnvRemoteSource, MockHarness> = {
   "claude-code": { installed: true, path: "/home/dev/.local/bin/claude", version: "2.1.246", channel: null, loggedIn: null, authDetail: null },
   codex: { installed: true, path: "/home/dev/.local/bin/codex", version: "0.148.0", channel: null, loggedIn: false, authDetail: null },
   dsh: { installed: false, path: null, version: null, channel: null, loggedIn: null, authDetail: null },
@@ -487,6 +497,7 @@ async function handleIPC(
         "claude-code": { installed: true, version: "2.1.246", channel: "native-installer", path: "/Users/mock/.local/bin/claude" },
         codex: { installed: true, version: "0.148.0", channel: "standalone", path: "/Users/mock/.codex/packages/standalone/current/bin/codex" },
         dsh: { installed: true, version: "0.1.1-rc.2", channel: "npm-global", path: "/opt/homebrew/bin/dsh" },
+        agy: { installed: true, version: "1.5.12", channel: "homebrew", path: "/opt/homebrew/bin/agy" },
       };
       Object.assign(mockHarness[src], fresh[src]);
       await emitInstallLines(src, [`installed: ${src} ${mockHarness[src].version}`]);
@@ -577,7 +588,7 @@ async function handleIPC(
     case "remote_workspace_harness_statuses":
       return ENV_REMOTE_SOURCES.map((src) => ({ source: src, ...mockRemoteHarness[src] }));
     case "install_harness_remote": {
-      const src = args.source as EnvSource;
+      const src = args.source as EnvRemoteSource;
       const key = `remote:${args.path as string}:${src}`;
       await emitInstallLines(key, ["$ ssh dev@train-rig <official installer>", "downloading…", "remote install verified."]);
       Object.assign(mockRemoteHarness[src], { installed: true, version: src === "dsh" ? "0.1.1-rc.2" : "0.148.0", path: `/home/dev/.local/bin/${src}` });

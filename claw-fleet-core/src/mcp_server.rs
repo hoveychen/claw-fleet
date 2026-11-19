@@ -241,7 +241,7 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
                     session_is_fleet_owned(),
                     launch_token_env().as_deref(),
                     crate::codex_launch::launch_token_is_pending,
-                ),
+                ) || agy_run_is_fleet_launch(),
                 client_has_native_image_gen(),
             );
             let subtask =
@@ -614,6 +614,15 @@ fn launch_token_env() -> Option<String> {
     std::env::var(crate::codex_launch::FLEET_CODEX_LAUNCH_TOKEN_ENV)
         .ok()
         .filter(|t| !t.is_empty())
+}
+
+/// Whether this process runs under an agy turn Fleet launched: its run-id env
+/// names an existing run record. Like the codex launch token, this covers the
+/// listing that happens before agy has minted the conversation id.
+fn agy_run_is_fleet_launch() -> bool {
+    std::env::var(crate::agy_hooks::RUN_ENV)
+        .ok()
+        .is_some_and(|r| crate::agy_source::session_id_for_run(r.trim()).is_some())
 }
 
 /// Whether `tools/list` advertises the control tools. A new Codex session lists

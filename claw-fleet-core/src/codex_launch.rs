@@ -183,6 +183,7 @@ fn env_session_id_precedence(claude: Option<String>, fleet: Option<String>) -> O
 ///   3. `FLEET_CODEX_LAUNCH_TOKEN` → thread id via [`resolve_launch_token`]
 ///      (a new Codex spawn, whose thread id isn't minted until after launch, so
 ///      Fleet injects a token up front and writes the token→id note later)
+///   4. `FLEET_AGY_RUN` → the agy run record's session key
 ///
 /// Returns `None` when none resolve to a non-empty id.
 pub fn resolve_fleet_session_id_from_env() -> Option<String> {
@@ -196,6 +197,13 @@ pub fn resolve_fleet_session_id_from_env() -> Option<String> {
         .ok()
         .filter(|t| !t.is_empty())
         .and_then(|t| resolve_launch_token(&t))
+        // 4. An agy process Fleet launched carries its run id; the run record
+        //    names the conversation once agy has minted it.
+        .or_else(|| {
+            std::env::var(crate::agy_hooks::RUN_ENV)
+                .ok()
+                .and_then(|r| crate::agy_source::session_id_for_run(r.trim()))
+        })
 }
 
 /// Directory holding the transient stdout sinks for Fleet-spawned Codex turns

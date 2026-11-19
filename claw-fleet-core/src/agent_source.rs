@@ -489,7 +489,15 @@ pub fn set_source_enabled_local(name: &str, enabled: bool) -> Result<(), String>
     config
         .sources
         .insert(name.to_string(), SourceEntry { enabled });
-    config.save()
+    config.save()?;
+    if name == crate::agy_source::SOURCE_NAME {
+        // agy's carriers live in shared config files; switching the source off
+        // takes Fleet's entries back out of them.
+        if let Err(e) = crate::agy_hooks::reconcile() {
+            crate::log_debug(&format!("agy hooks reconcile: {e}"));
+        }
+    }
+    Ok(())
 }
 
 /// Build the list of enabled agent sources based on config.

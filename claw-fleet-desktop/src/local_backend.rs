@@ -3920,7 +3920,9 @@ impl LocalBackend {
         let dsh = crate::dsh_guidance::reconcile_dsh_from_claude_state(user_title, locale);
         // And the guidance Fleet hands its own claude sessions at launch.
         let claude = crate::claude_launch::reconcile_guidance(user_title, locale);
-        codex.and(dsh).and(claude)
+        // agy (Beta): Fleet's named hook + MCP entry in agy's shared config.
+        let agy = crate::agy_hooks::reconcile();
+        codex.and(dsh).and(claude).and(agy)
     }
 
     pub fn respond_to_elicitation(
