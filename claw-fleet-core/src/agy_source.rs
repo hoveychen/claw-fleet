@@ -901,7 +901,7 @@ fn detail_fingerprint(key: &str, db: Option<&Path>, history: Option<&Path>, runs
         r.outcome.status.hash(&mut h);
         r.outcome.conversation_id.hash(&mut h);
     }
-    h.finish() | 1
+    (h.finish() & crate::agent_source::JS_SAFE_CURSOR_MASK) | 1
 }
 
 /// Tail window re-sent when the fingerprint changes; clients dedup by uuid.
@@ -1232,16 +1232,21 @@ impl AgentSource for AgySource {
     /// changed → the last [`TAIL_WINDOW`] messages, which clients dedup by
     /// their stable uuids (the Codex follow model).
     fn tail_incremental(&self, path: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
-        let key = key_of(path);
-        let runs = runs_dir().map(|d| load_runs(&d)).unwrap_or_default();
-        let db = (!key.starts_with(RUN_ID_PREFIX)).then(|| conversation_db(key)).flatten();
-        let fp = detail_fingerprint(key, db.as_deref(), history_path().as_deref(), &runs);
+        let fp = self.tail_cursor(path)?;
         if fp == offset {
             return Ok((Vec::new(), fp));
         }
         let all = self.get_messages(path)?;
         let start = all.len().saturating_sub(TAIL_WINDOW);
         Ok((all[start..].to_vec(), fp))
+    }
+
+    /// Only the fingerprint: no message is decoded to start a follow.
+    fn tail_cursor(&self, path: &str) -> Result<u64, String> {
+        let key = key_of(path);
+        let runs = runs_dir().map(|d| load_runs(&d)).unwrap_or_default();
+        let db = (!key.starts_with(RUN_ID_PREFIX)).then(|| conversation_db(key)).flatten();
+        Ok(detail_fingerprint(key, db.as_deref(), history_path().as_deref(), &runs))
     }
 
     fn watch_strategy(&self) -> WatchStrategy {
