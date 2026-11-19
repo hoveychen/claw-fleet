@@ -65,6 +65,7 @@ function SectionHead({ label, device }: { label: string; device?: string | null 
 const SOURCE_LABEL: Record<string, string> = {
   codex: "Codex",
   dsh: "DeepSeek Harness",
+  agy: "Antigravity (Beta)",
 };
 
 /** Format amounts by the currency each provider reports. They differ — DeepSeek

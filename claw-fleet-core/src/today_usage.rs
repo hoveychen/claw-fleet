@@ -435,7 +435,13 @@ fn build_lines(
     let mut lines: Vec<ModelReceiptLine> = by_model
         .into_iter()
         .map(|((source, model), acc)| {
-            let c = get_model_costs(&model);
+            // agy lines carry Gemini (or Claude) ids; the Claude table would
+            // price an unknown Gemini id at its default tier.
+            let c = if source == crate::agy_source::SOURCE_NAME {
+                crate::model_cost::agy_reference_costs(&model)
+            } else {
+                get_model_costs(&model)
+            };
             // `acc.cache_creation` is the total; the 1h figure is its subset, so
             // the 5-minute row is the remainder. saturating_sub keeps a
             // malformed pair from wrapping the row into nonsense.
@@ -447,7 +453,12 @@ fn build_lines(
             // cost_usd`. Every other source is priced by the table and reconciles.
             // The report-history line mixes models, so no single rate fits it
             // either; it carries the report's stored cost the same way.
-            let priced_by_provider = source == "dsh" || source == REPORT_SOURCE;
+            // agy is priced per generation at the official list price in
+            // force on that day (gemini-4-carbon/argon change on 2026-12-01),
+            // so one $/M column cannot reconcile a window that spans a change.
+            let priced_by_provider = source == "dsh"
+                || source == REPORT_SOURCE
+                || source == crate::agy_source::SOURCE_NAME;
             ModelReceiptLine {
                 model,
                 source,
@@ -1033,6 +1044,45 @@ fn dsh_cells(calls: &[crate::dsh_cost::PricedCall]) -> SessionCells {
     cells
 }
 
+/// An agy session's usage, one cell per (local date, model) from the
+/// conversation database's `gen_metadata`. A Fleet launch agy refused
+/// (`agy-run-…`) has no database and no usage.
+fn fold_agy_session_cells(s: &SessionInfo) -> SessionCells {
+    let key = s.jsonl_path.strip_prefix(crate::agy_source::URI_PREFIX).unwrap_or(&s.id);
+    let Some(db) = crate::agy_source::agy_home()
+        .filter(|_| !key.starts_with(crate::agy_source::RUN_ID_PREFIX))
+        .map(|h| h.join("conversations").join(format!("{key}.db")))
+    else {
+        return SessionCells::new();
+    };
+    agy_cells(&crate::agy_source::conversation(&db, key).generations.rows)
+}
+
+/// Pure core of [`fold_agy_session_cells`]. Per generation, like dsh: a
+/// multi-day conversation books each day's spend on its own day.
+fn agy_cells(gens: &[crate::agy_conv::Generation]) -> SessionCells {
+    let mut cells = SessionCells::new();
+    for g in gens {
+        let date = local_date_str(g.timestamp_ms as i64);
+        let model = g.model.clone().unwrap_or_else(|| "unknown".to_string());
+        let usd = crate::agy_source::generation_cost_usd(g);
+        let acc = cells.entry((date, model)).or_default();
+        // agy reports one cache-write bucket with no TTL split.
+        acc.add(
+            g.input_tokens,
+            g.cache_write_tokens,
+            0,
+            g.cache_read_tokens,
+            g.output_tokens,
+            usd.unwrap_or(0.0),
+        );
+        if usd.is_none() {
+            acc.add_unpriced(1);
+        }
+    }
+    cells
+}
+
 /// Sum cells whose non-empty date is within `[from_date, to_date]` (undated
 /// dropped) into both `by_model` and the per-day trend `by_day`. Dates
 /// are `YYYY-MM-DD`, so lexicographic comparison is chronological.
@@ -1211,6 +1261,9 @@ fn fold_session_cells(s: &SessionInfo) -> SessionCells {
         // `read_to_string` below would return "" and silently drop the session's
         // spend. This is the branch that makes dsh spend appear on the receipt.
         fold_dsh_session_cells(s)
+    } else if s.agent_source == crate::agy_source::SOURCE_NAME {
+        // `agy://` URI as well; usage lives in the conversation database.
+        fold_agy_session_cells(s)
     } else {
         let jsonl = std::fs::read_to_string(&s.jsonl_path).unwrap_or_default();
         fold_claude_session_cells(&jsonl)
@@ -3804,6 +3857,43 @@ mod range_breakdown_tests {
             "provider cost carried verbatim"
         );
         assert_eq!(acc.unpriced, 0);
+    }
+
+    /// agy generations fold per (day, model) at the Gemini list price; an
+    /// unpriced model adds tokens and an unpriced count, never Claude's
+    /// default tier; the receipt line is flagged and shows Gemini rates.
+    #[test]
+    fn agy_cells_price_gemini_and_flag_unpriced_models() {
+        use crate::agy_conv::Generation;
+        let at = 1_795_000_000_000u64; // 2026-11-18, before the carbon rise
+        let g = |model: &str, input: u64, output: u64| Generation {
+            key: format!("{model}-{input}"),
+            timestamp_ms: at,
+            model: Some(model.into()),
+            input_tokens: input,
+            output_tokens: output,
+            ..Default::default()
+        };
+        let cells = agy_cells(&[
+            g("gemini-4-neon-high", 1_000_000, 0),
+            g("gemini-4-neon-high", 0, 1_000_000),
+            g("gpt-oss-120b-medium", 10, 10),
+        ]);
+        let date = local_date_str(at as i64);
+        let neon = &cells[&(date.clone(), "gemini-4-neon-high".to_string())];
+        assert!((neon.cost - 18.0).abs() < 1e-9, "{}", neon.cost);
+        assert_eq!(neon.unpriced, 0);
+        let oss = &cells[&(date, "gpt-oss-120b-medium".to_string())];
+        assert_eq!(oss.cost, 0.0);
+        assert_eq!(oss.unpriced, 1);
+
+        let mut by_model = std::collections::HashMap::new();
+        let mut acc = LineAcc::default();
+        acc.add(neon.input, 0, 0, 0, neon.output, neon.cost);
+        by_model.insert(("agy".to_string(), "gemini-4-neon-high".to_string()), acc);
+        let lines = build_lines(by_model);
+        assert!(lines[0].priced_by_provider, "per-day list price, not a $/M column");
+        assert_eq!(lines[0].input_price, 3.0, "Gemini rate, not the Claude default");
     }
 
     /// A call whose route the log never named still counts its tokens, under a

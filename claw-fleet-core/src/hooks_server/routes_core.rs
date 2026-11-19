@@ -345,6 +345,10 @@ pub(crate) fn route_harness_statuses(
 /// an unvalidated `source` from the request body would be shell injection on
 /// the serving host. Comparing against a fixed set means nothing from the wire
 /// is ever interpolated — the matched constant is.
+#[cfg(not(windows))]
+const INSTALLABLE_SOURCES: &[&str] = &["claude-code", "codex", "dsh", "agy"];
+/// agy documents no Windows installer, so its install button is not offered there.
+#[cfg(windows)]
 const INSTALLABLE_SOURCES: &[&str] = &["claude-code", "codex", "dsh"];
 
 /// Which `fleet harness` verb a request maps to.

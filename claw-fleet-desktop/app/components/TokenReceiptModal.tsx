@@ -96,6 +96,7 @@ const SOURCE_LABEL: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
   dsh: "DeepSeek Harness",
+  agy: "Antigravity (Beta)",
   fleet: "Fleet",
 };
 

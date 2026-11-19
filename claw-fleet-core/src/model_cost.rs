@@ -606,9 +606,173 @@ fn cost_with(c: &ModelCosts, usage: &TurnUsage) -> f64 {
         + (usage.web_search_requests as f64) * c.web_search
 }
 
+// ── Gemini (served through Antigravity CLI) ──────────────────────────────────
+//
+// Google AI Studio pricing page, Standard tier, checked 2026-11-19; USD per
+// 1M tokens (input / output / cache read). No model has a long-context tier.
+// Gemini bills context caching as per-hour storage rather than per write, so a
+// cache write is priced at the input rate here (Fleet sees no storage time).
+// These are API-equivalent figures: a subscription user pays a flat fee, the
+// same convention Fleet uses for Claude subscriptions.
+
+const fn gemini(input: f64, output: f64, cache_read: f64) -> ModelCosts {
+    ModelCosts {
+        input,
+        output,
+        cache_write: input,
+        cache_write_1h: input,
+        cache_read,
+        web_search: 0.0,
+    }
+}
+
+/// gemini-4-carbon / gemini-4-argon before their 2026-12-01 price rise.
+pub const COST_GEMINI_4_CARBON_ARGON: ModelCosts = gemini(2.0, 10.0, 0.10);
+/// gemini-4-carbon / gemini-4-argon from 2026-12-01.
+pub const COST_GEMINI_4_CARBON_ARGON_DEC: ModelCosts = gemini(4.0, 20.0, 0.20);
+pub const COST_GEMINI_4_NEON: ModelCosts = gemini(3.0, 15.0, 0.15);
+pub const COST_GEMINI_4_HYDROGEN: ModelCosts = gemini(1.50, 7.50, 0.075);
+/// gemini-3.8-flash before its announced 2027-01-01 doubling.
+pub const COST_GEMINI_38_FLASH: ModelCosts = gemini(0.75, 3.75, 0.075);
+/// gemini-3.8-flash from 2027-01-01 (announced as a doubling; the cache-read
+/// rate is assumed to double with it).
+pub const COST_GEMINI_38_FLASH_2027: ModelCosts = gemini(1.50, 7.50, 0.15);
+
+/// 2026-12-01T00:00:00Z — gemini-4-carbon / argon price change.
+const GEMINI_4_CARBON_ARGON_RISE_MS: u64 = 1_796_083_200_000;
+/// 2027-01-01T00:00:00Z — gemini-3.8-flash price change.
+const GEMINI_38_FLASH_RISE_MS: u64 = 1_798_761_600_000;
+
+/// Normalise an agy model label — an id (`gemini-4-neon-high`) or a display
+/// name (`Gemini 4 Neon (High)`, `Claude Sonnet 5.5`) — to a dashed lowercase
+/// id (`gemini-4-neon-high`, `claude-sonnet-5-5`).
+fn agy_model_id(model: &str) -> String {
+    let mut out = String::with_capacity(model.len());
+    for c in model.trim().chars() {
+        match c {
+            ' ' | '_' | '.' => out.push('-'),
+            '(' | ')' => {}
+            c => out.push(c.to_ascii_lowercase()),
+        }
+    }
+    while out.contains("--") {
+        out = out.replace("--", "-");
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// Pricing for a Gemini model at `at_ms`; `None` for an id Fleet has no
+/// price for. Never falls back to [`DEFAULT_UNKNOWN_COST`] — that is a Claude
+/// tier and would misprice Gemini by several times.
+pub fn gemini_costs(model: &str, at_ms: u64) -> Option<ModelCosts> {
+    let m = agy_model_id(model);
+    if !m.starts_with("gemini-") {
+        return None;
+    }
+    if m.starts_with("gemini-4-carbon") || m.starts_with("gemini-4-argon") {
+        return Some(if at_ms >= GEMINI_4_CARBON_ARGON_RISE_MS {
+            COST_GEMINI_4_CARBON_ARGON_DEC
+        } else {
+            COST_GEMINI_4_CARBON_ARGON
+        });
+    }
+    if m.starts_with("gemini-4-neon") {
+        return Some(COST_GEMINI_4_NEON);
+    }
+    if m.starts_with("gemini-4-hydrogen") {
+        return Some(COST_GEMINI_4_HYDROGEN);
+    }
+    // "gemini-3-8-flash" after normalisation turned the dot into a dash.
+    if m.starts_with("gemini-3-8-flash") {
+        return Some(if at_ms >= GEMINI_38_FLASH_RISE_MS {
+            COST_GEMINI_38_FLASH_2027
+        } else {
+            COST_GEMINI_38_FLASH
+        });
+    }
+    None
+}
+
+/// USD cost of one agy generation, `None` when the model is unpriced. agy also
+/// serves Claude models; those take the Claude price list. Anything else
+/// (`gpt-oss-*`, unknown Gemini ids) is unpriced, never $0 and never the
+/// Claude default tier.
+///
+/// `input_tokens` is uncached input; `output_tokens` already includes thinking.
+pub fn agy_generation_cost_usd(
+    model: &str,
+    at_ms: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_write_tokens: u64,
+    cache_read_tokens: u64,
+) -> Option<f64> {
+    let usage = TurnUsage {
+        input_tokens,
+        output_tokens,
+        cache_creation_tokens: cache_write_tokens,
+        cache_read_tokens,
+        ..Default::default()
+    };
+    if let Some(c) = gemini_costs(model, at_ms) {
+        return Some(cost_with(&c, &usage));
+    }
+    let id = agy_model_id(model);
+    if id.starts_with("claude-") {
+        return Some(turn_cost_usd(&id, &usage));
+    }
+    None
+}
+
+/// Reference $/M rates shown beside an agy receipt line: today's Gemini
+/// price, the Claude list for `claude-*`, all-zero for an unpriced model.
+pub fn agy_reference_costs(model: &str) -> ModelCosts {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    if let Some(c) = gemini_costs(model, now) {
+        return c;
+    }
+    let id = agy_model_id(model);
+    if id.starts_with("claude-") {
+        return get_model_costs(&id);
+    }
+    gemini(0.0, 0.0, 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agy_gemini_prices_never_fall_back_to_the_claude_default() {
+        let jan = 1_795_000_000_000; // 2026-11-18
+        let dec = GEMINI_4_CARBON_ARGON_RISE_MS + 1;
+        // Ids and display names resolve alike.
+        for m in ["gemini-4-neon-high", "Gemini 4 Neon (High)", "gemini-4-neon"] {
+            let c = gemini_costs(m, jan).unwrap();
+            assert_eq!((c.input, c.output, c.cache_read), (3.0, 15.0, 0.15), "{m}");
+        }
+        assert_eq!(gemini_costs("gemini-4-carbon-low", jan).unwrap().input, 2.0);
+        assert_eq!(gemini_costs("gemini-4-argon", dec).unwrap().input, 4.0);
+        assert_eq!(gemini_costs("Gemini 3.8 Flash (Low)", jan).unwrap().output, 3.75);
+        assert_eq!(
+            gemini_costs("gemini-3.8-flash-high", GEMINI_38_FLASH_RISE_MS).unwrap().input,
+            1.50
+        );
+        assert_eq!(gemini_costs("gemini-4-hydrogen", jan).unwrap().cache_read, 0.075);
+        // Unknown Gemini / gpt-oss are unpriced rather than $5/$25.
+        assert!(gemini_costs("gemini-9-unknown", jan).is_none());
+        assert!(agy_generation_cost_usd("gemini-9-unknown", jan, 1, 1, 0, 0).is_none());
+        assert!(agy_generation_cost_usd("gpt-oss-120b-medium", jan, 1, 1, 0, 0).is_none());
+        // 1M in + 1M out on neon = $3 + $15.
+        let usd = agy_generation_cost_usd("gemini-4-neon-high", jan, 1_000_000, 1_000_000, 0, 0).unwrap();
+        assert!((usd - 18.0).abs() < 1e-9, "{usd}");
+        // Claude through agy takes the Claude list (sonnet 5.5 display name).
+        let claude = agy_generation_cost_usd("Claude Sonnet 5.5", jan, 1_000_000, 0, 0, 0).unwrap();
+        assert!((claude - get_model_costs("claude-sonnet-5-5").input).abs() < 1e-9);
+    }
 
     #[test]
     fn gpt_long_context_tier_starts_above_272k() {

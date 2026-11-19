@@ -118,6 +118,19 @@ pub(crate) fn cmd_spawn(
 
     let ws_name = claw_fleet_core::wiki::workspace_name_of(&workspace_path);
     match resp.session_id.as_deref() {
+        // An agy launch that got no conversation id: agy failed before creating
+        // one (the eligibility check does), or had not named it yet when the
+        // launch stopped waiting. There is no conversation to send to.
+        Some(new_sid) if new_sid.starts_with(claw_fleet_core::agy_source::RUN_ID_PREFIX) => {
+            println!(
+                "ok: agy turn {new_sid} started in {ws_name} ({workspace_path}), model={}{}, pid {}.\n\
+                 agy 还没给出会话 id（多半是启动即失败，报错原文见该行详情）。这一行没有可续跑的会话，\
+                 `fleet send` 不适用；修好原因后重新 spawn。",
+                route.model.as_deref().unwrap_or("<CLI 默认>"),
+                route.switch_note(),
+                resp.pid,
+            )
+        }
         Some(new_sid) => println!(
             "ok: session {new_sid} started in {ws_name} ({workspace_path}), model={}{}, pid {}.\n\
              操控用 `fleet send {new_sid} <话>` / `fleet interrupt {new_sid}`。",

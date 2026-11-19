@@ -61,7 +61,7 @@ pub struct HarnessStatus {
 
 /// Probe every harness Fleet knows how to drive, in stable order.
 pub fn probe_all() -> Vec<HarnessStatus> {
-    vec![probe_claude(), probe_codex(), probe_dsh()]
+    vec![probe_claude(), probe_codex(), probe_dsh(), probe_agy()]
 }
 
 /// Probe a single harness by its source id; `None` for an unknown id.
@@ -70,6 +70,7 @@ pub fn probe_source(source: &str) -> Option<HarnessStatus> {
         "claude-code" => Some(probe_claude()),
         "codex" => Some(probe_codex()),
         "dsh" => Some(probe_dsh()),
+        "agy" => Some(probe_agy()),
         _ => None,
     }
 }
@@ -271,6 +272,41 @@ fn codex_auth_state_from_json(v: &Value) -> (Option<bool>, Option<String>) {
         (Some(true), Some("api-key".to_string()))
     } else {
         (Some(false), None)
+    }
+}
+
+// ── agy (Antigravity CLI, Beta) ───────────────────────────────────────────────
+
+fn probe_agy() -> HarnessStatus {
+    let path = crate::agy_source::find_agy_binary().map(|p| p.to_string_lossy().to_string());
+    let channel = path.as_deref().map(agy_channel_for_path);
+    let version = path.as_deref().and_then(probe_version);
+    HarnessStatus {
+        source: crate::agy_source::SOURCE_NAME.to_string(),
+        installed: path.is_some(),
+        path,
+        version,
+        channel: channel.map(str::to_string),
+        // agy signs in with a Google account, but where it keeps that login is
+        // not known (no account on hand gets past its eligibility check), so
+        // the state is reported as unknown rather than guessed.
+        logged_in: None,
+        auth_detail: None,
+        outdated: false,
+        min_version: None,
+    }
+}
+
+/// The Homebrew cask installs a wrapper under `/opt/homebrew/bin` that links
+/// into `Caskroom/antigravity-cli`; anything else came from the install script.
+fn agy_channel_for_path(path: &str) -> &'static str {
+    let canon = std::fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string());
+    if canon.contains("/Caskroom/") {
+        "homebrew"
+    } else {
+        "path"
     }
 }
 
@@ -641,6 +677,6 @@ mod tests {
         // probe must answer for all three sources in stable order.
         let all = probe_all();
         let ids: Vec<&str> = all.iter().map(|s| s.source.as_str()).collect();
-        assert_eq!(ids, vec!["claude-code", "codex", "dsh"]);
+        assert_eq!(ids, vec!["claude-code", "codex", "dsh", "agy"]);
     }
 }

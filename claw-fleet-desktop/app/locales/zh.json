@@ -3028,6 +3028,7 @@
     "not_logged_in": "未登录",
     "managed_by_foxy": "凭证由 foxy 托管",
     "dsh_byok": "无需登录(自带 API Key)",
+    "agy_login_unknown": "在 agy 里用 Google 账号登录（Fleet 读不到登录状态）",
     "channel_label": "安装渠道",
     "channel": {
       "native-installer": "官方安装器",

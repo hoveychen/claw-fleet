@@ -1,33 +1,29 @@
-//! Antigravity CLI (`agy`) agent source — phase 1.
+//! Antigravity CLI (`agy`) agent source (Beta).
 //!
 //! `agy` is Google's closed-source Go CLI that replaced Gemini CLI for personal
-//! (AI Pro / Ultra) subscriptions. Phase 1 covers only what Fleet can do without
-//! decoding its protobuf transcripts:
+//! (AI Pro / Ultra) subscriptions. What Fleet reads and drives:
 //!
 //! - **Session list** from `~/.gemini/antigravity-cli/conversation_summaries.db`
 //!   (SQLite, written by agy in WAL mode). Read-only, never `immutable=1` (that
 //!   reads torn pages while agy writes), and a 0-byte file is skipped without
 //!   opening it: a reader's lock on a fresh rollback-journal file blocks agy's
 //!   first write.
+//! - **Message bodies and usage** from `conversations/<id>.db`, decoded by
+//!   [`crate::agy_conv`] (see its docs for where every field number comes from
+//!   and the caveat that no real non-empty conversation has been decoded yet).
+//!   Conversations without readable steps fall back to agy's prompt history
+//!   (`history.jsonl`) plus Fleet's own run records.
 //! - **Launch / resume** through headless `agy -p … --output-format stream-json`
 //!   (`--conversation <id>` to resume). agy mints the conversation id itself and
 //!   prints it on the `init` event; there is no flag to pre-assign one.
 //! - **Fleet run records** (`~/.fleet/agy-runs/<run_id>.{json,out,err}`): the
-//!   stdout/stderr of every Fleet-started turn is kept, because it is the only
-//!   place Fleet can read the outcome of a turn in phase 1. A launch that fails
+//!   stdout/stderr of every Fleet-started turn is kept. A launch that fails
 //!   before agy creates a conversation — the eligibility check does exactly that,
 //!   answering with a `result` whose `conversation_id` is empty — still gets a
 //!   session row (`agy-run-<run_id>`) that carries the raw error.
 //!
-//! Out of scope (phase 2): message bodies (`conversations/<id>.db` steps are
-//! field-number protobuf), usage/cost, hooks, guidance injection, the
-//! decision-card MCP bridge, and auto-resume.
-//!
-//! Where phase 2 slots in: body decoding belongs in a sibling module (e.g.
-//! `agy_steps.rs`) whose output [`detail_messages`] splices in after the
-//! notice, replacing it once decoding works; [`build_sessions`] is where
-//! per-conversation stats (model, tokens, last activity from `steps`) overlay
-//! the index row, the way [`overlay_runs`] does for Fleet's own runs.
+//! Out of scope: auto-resume and rate-limit handling (agy exposes no quota
+//! surface Fleet can read).
 
 use std::collections::HashMap;
 use std::io::{BufRead as _, Write as _};
@@ -254,6 +250,124 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+// ── conversation databases ───────────────────────────────────────────────────
+
+/// `(len, mtime_ms)` of a file, `(0, 0)` when absent.
+fn stat_pair(path: &Path) -> (u64, u64) {
+    std::fs::metadata(path)
+        .map(|m| {
+            let mtime = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            (m.len(), mtime)
+        })
+        .unwrap_or((0, 0))
+}
+
+fn wal_path(db: &Path) -> PathBuf {
+    let mut name = db.as_os_str().to_owned();
+    name.push("-wal");
+    PathBuf::from(name)
+}
+
+/// Change fingerprint of a conversation database: its own and its WAL's stat.
+/// agy's writes land in the WAL first, so the main file alone would miss them.
+fn db_fingerprint(db: &Path) -> [(u64, u64); 2] {
+    [stat_pair(db), stat_pair(&wal_path(db))]
+}
+
+/// Decoded conversations keyed by database path, reused while the database's
+/// fingerprint is unchanged — the scan polls every 5s and must not re-decode
+/// every conversation on each beat.
+type ConvCache = HashMap<PathBuf, ([(u64, u64); 2], std::sync::Arc<crate::agy_conv::Conversation>)>;
+static CONV_CACHE: Mutex<Option<ConvCache>> = Mutex::new(None);
+
+/// Read (or reuse) one conversation's decoded steps and usage. A decode error
+/// is logged and reads as an empty conversation.
+pub fn conversation(db: &Path, conv: &str) -> std::sync::Arc<crate::agy_conv::Conversation> {
+    let fp = db_fingerprint(db);
+    if let Ok(guard) = CONV_CACHE.lock() {
+        if let Some((cached_fp, c)) = guard.as_ref().and_then(|m| m.get(db)) {
+            if *cached_fp == fp {
+                return c.clone();
+            }
+        }
+    }
+    let decoded = crate::agy_conv::read_conversation(db, conv).unwrap_or_else(|e| {
+        crate::log_debug(&format!("agy: decode {}: {e}", db.display()));
+        crate::agy_conv::Conversation::default()
+    });
+    if decoded.steps_skipped > 0 || decoded.generations.drifted > 0 {
+        crate::log_debug(&format!(
+            "agy: {conv}: {} step(s) in an unsupported shape, {} usage row(s) failed the self-check",
+            decoded.steps_skipped, decoded.generations.drifted
+        ));
+    }
+    let arc = std::sync::Arc::new(decoded);
+    if let Ok(mut guard) = CONV_CACHE.lock() {
+        guard
+            .get_or_insert_with(HashMap::new)
+            .insert(db.to_path_buf(), (fp, arc.clone()));
+    }
+    arc
+}
+
+/// `conversations/<id>.db` under agy's home.
+fn conversation_db(conv: &str) -> Option<PathBuf> {
+    agy_home().map(|h| h.join("conversations").join(format!("{conv}.db")))
+}
+
+// ── history.jsonl ────────────────────────────────────────────────────────────
+
+/// One prompt from agy's `history.jsonl` (what the user typed, by
+/// conversation). Real lines look like
+/// `{"display":"hi","timestamp":1795…,"workspace":"/p","conversationId":"…"}`;
+/// slash commands carry `"type":"slash_command"` and are not prompts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HistoryEntry {
+    pub conversation_id: String,
+    pub display: String,
+    pub timestamp_ms: u64,
+}
+
+/// History lines kept from the tail of the file.
+const HISTORY_TAIL_BYTES: u64 = 4 * 1024 * 1024;
+
+pub fn read_history(path: &Path) -> Vec<HistoryEntry> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = len.saturating_sub(HISTORY_TAIL_BYTES);
+    if f.seek(SeekFrom::Start(start)).is_err() {
+        return Vec::new();
+    }
+    let mut buf = Vec::new();
+    let _ = f.read_to_end(&mut buf);
+    let text = String::from_utf8_lossy(&buf);
+    text.lines()
+        // A tail read starts mid-line; that partial line fails to parse.
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v.get("type").and_then(Value::as_str).is_none_or(|t| t != "slash_command"))
+        .filter_map(|v| {
+            Some(HistoryEntry {
+                conversation_id: v.get("conversationId")?.as_str()?.trim().to_string(),
+                display: v.get("display")?.as_str()?.to_string(),
+                timestamp_ms: v.get("timestamp").and_then(Value::as_u64).unwrap_or(0),
+            })
+        })
+        .filter(|e| !e.conversation_id.is_empty() && !e.display.trim().is_empty())
+        .collect()
+}
+
+fn history_path() -> Option<PathBuf> {
+    agy_home().map(|h| h.join("history.jsonl"))
 }
 
 // ── Fleet run records ────────────────────────────────────────────────────────
@@ -506,6 +620,9 @@ pub fn build_sessions(
             },
             ..Default::default()
         };
+        if let Some(db) = db.as_deref() {
+            overlay_conversation(&mut s, &conversation(db, &row.conversation_id));
+        }
         if let Some(rs) = by_key.remove(&row.conversation_id) {
             overlay_runs(&mut s, &rs, &is_alive);
         }
@@ -539,6 +656,63 @@ pub fn build_sessions(
     }
     sessions.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
     sessions
+}
+
+/// Apply what the decoded conversation knows: token totals, cost, the model of
+/// the latest generation, and the last decoded message as the preview.
+fn overlay_conversation(s: &mut SessionInfo, conv: &crate::agy_conv::Conversation) {
+    let (input, output) = conv.generations.totals();
+    s.total_input_tokens = input;
+    s.total_output_tokens = output;
+    s.reasoning_output_tokens = conv.generations.rows.iter().map(|g| g.thinking_tokens).sum();
+    s.total_cost_usd = conv
+        .generations
+        .rows
+        .iter()
+        .filter_map(generation_cost_usd)
+        .sum();
+    s.agent_total_cost_usd = s.total_cost_usd;
+    if let Some(m) = conv.generations.last_model() {
+        s.model = Some(m.to_string());
+    }
+    if let Some(ms) = conv.generations.rows.iter().map(|g| g.timestamp_ms).max() {
+        s.last_activity_ms = s.last_activity_ms.max(ms);
+    }
+    if let Some(preview) = conv.messages.iter().rev().find_map(message_preview) {
+        s.last_message_preview = Some(preview);
+    }
+}
+
+/// Plain text of a decoded message (user string content or assistant text
+/// blocks), for the list preview.
+fn message_preview(m: &Value) -> Option<String> {
+    let content = m.get("message")?.get("content")?;
+    let text = match content {
+        Value::String(s) => s.clone(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|b| b.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => return None,
+    };
+    let t = text.trim();
+    (!t.is_empty()).then(|| t.chars().take(300).collect())
+}
+
+/// USD cost of one generation, `None` when its model has no known price
+/// (unpriced is not free — callers must not fold it in as $0 silently).
+pub fn generation_cost_usd(g: &crate::agy_conv::Generation) -> Option<f64> {
+    let model = g.model.as_deref()?;
+    crate::model_cost::agy_generation_cost_usd(
+        model,
+        g.timestamp_ms,
+        g.input_tokens,
+        g.output_tokens,
+        g.cache_write_tokens,
+        g.cache_read_tokens,
+    )
 }
 
 /// Apply what Fleet's own runs know to a session row: liveness, model, and the
@@ -603,61 +777,135 @@ fn title_from_prompt(prompt: &str) -> String {
 
 // ── detail messages ──────────────────────────────────────────────────────────
 
-/// What the detail view shows for an agy session in phase 1: a notice that the
-/// body cannot be read yet, then the prompt and raw outcome of every turn Fleet
-/// started for it. Claude-shaped records, so every client renders them as-is.
-pub fn detail_messages(key: &str, runs: &[RunRecord]) -> Vec<Value> {
-    let mut out = vec![json!({
+fn iso_ms(ms: u64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms as i64)
+        .map(|t| t.to_rfc3339())
+        .unwrap_or_default()
+}
+
+fn run_result_message(r: &RunRecord) -> Option<Value> {
+    let text = match r.error_text() {
+        Some(err) => format!("agy error: {err}"),
+        None => r.outcome.response.clone()?,
+    };
+    let ts = iso_ms(r.meta.ended_ms.unwrap_or(r.meta.started_ms));
+    Some(json!({
         "type": "assistant",
-        "uuid": format!("agy:{key}:notice"),
-        "message": {
-            "role": "assistant",
-            "content": [{
-                "type": "text",
-                "text": "Antigravity CLI (agy) 会话正文暂不支持查看——一期只列会话、启动与续跑。\
-                         下面是 Fleet 自己发起的轮次的提示词与 agy 的原始结果。\n\n\
-                         Viewing agy conversation bodies is not supported yet. \
-                         Below are the turns Fleet started and agy's raw outcome."
-            }],
-        },
-    })];
-    for r in runs.iter().filter(|r| r.session_key() == key) {
-        let ts = chrono::DateTime::from_timestamp_millis(r.meta.started_ms as i64)
-            .map(|t| t.to_rfc3339())
-            .unwrap_or_default();
-        if !r.meta.prompt.is_empty() {
-            out.push(json!({
+        "uuid": format!("agy-run:{}:result", r.meta.run_id),
+        "timestamp": ts,
+        "message": { "role": "assistant", "content": [{ "type": "text", "text": text }] },
+    }))
+}
+
+/// The detail transcript of an agy session, Claude-shaped so every client
+/// renders it as-is.
+///
+/// - With decoded steps (`conv`), they are the transcript; Fleet's run records
+///   only add the raw error of a turn agy failed (those never become steps).
+/// - Without steps — a conversation agy refused, or one whose database is
+///   empty or in a shape the decoder skips — the transcript is rebuilt from
+///   agy's prompt history plus Fleet's runs (prompt and raw outcome), so the
+///   user still sees what was asked and what came back.
+pub fn detail_messages(
+    key: &str,
+    conv: Option<&crate::agy_conv::Conversation>,
+    history: &[HistoryEntry],
+    runs: &[RunRecord],
+) -> Vec<Value> {
+    let runs: Vec<&RunRecord> = runs.iter().filter(|r| r.session_key() == key).collect();
+    if let Some(c) = conv.filter(|c| !c.messages.is_empty()) {
+        let mut out = c.messages.clone();
+        out.extend(
+            runs.iter()
+                .filter(|r| r.error_text().is_some())
+                .filter_map(|r| run_result_message(r)),
+        );
+        return out;
+    }
+
+    // (timestamp, message) pairs, merged by time.
+    let mut items: Vec<(u64, Value)> = Vec::new();
+    let prompts: Vec<&HistoryEntry> = history.iter().filter(|h| h.conversation_id == key).collect();
+    for h in &prompts {
+        items.push((
+            h.timestamp_ms,
+            json!({
                 "type": "user",
-                "uuid": format!("agy-run:{}:prompt", r.meta.run_id),
-                "timestamp": ts,
-                "message": { "role": "user", "content": r.meta.prompt },
-            }));
+                "uuid": format!("agy:{key}:history:{}", h.timestamp_ms),
+                "timestamp": iso_ms(h.timestamp_ms),
+                "message": { "role": "user", "content": h.display },
+            }),
+        ));
+    }
+    for r in &runs {
+        // agy may log a Fleet-sent prompt to its history too; show it once.
+        let in_history = prompts.iter().any(|h| {
+            h.display.trim() == r.meta.prompt.trim()
+                && h.timestamp_ms.abs_diff(r.meta.started_ms) < 120_000
+        });
+        if !r.meta.prompt.is_empty() && !in_history {
+            items.push((
+                r.meta.started_ms,
+                json!({
+                    "type": "user",
+                    "uuid": format!("agy-run:{}:prompt", r.meta.run_id),
+                    "timestamp": iso_ms(r.meta.started_ms),
+                    "message": { "role": "user", "content": r.meta.prompt },
+                }),
+            ));
         }
-        let text = if let Some(err) = r.error_text() {
-            Some(format!("agy error: {err}"))
-        } else {
-            r.outcome.response.clone()
-        };
-        if let Some(text) = text {
-            let ts = r
-                .meta
-                .ended_ms
-                .and_then(|ms| chrono::DateTime::from_timestamp_millis(ms as i64))
-                .map(|t| t.to_rfc3339())
-                .unwrap_or(ts);
-            out.push(json!({
+        if let Some(m) = run_result_message(r) {
+            items.push((r.meta.ended_ms.unwrap_or(r.meta.started_ms) + 1, m));
+        }
+    }
+    items.sort_by_key(|(t, _)| *t);
+    let mut out: Vec<Value> = items.into_iter().map(|(_, m)| m).collect();
+    if conv.is_some_and(|c| c.steps_skipped > 0) {
+        out.insert(
+            0,
+            json!({
                 "type": "assistant",
-                "uuid": format!("agy-run:{}:result", r.meta.run_id),
-                "timestamp": ts,
+                "uuid": format!("agy:{key}:unsupported"),
                 "message": {
                     "role": "assistant",
-                    "content": [{ "type": "text", "text": text }],
+                    "content": [{
+                        "type": "text",
+                        "text": "这个 agy 会话的步骤存储格式 Fleet 还读不懂，下面只列出提示词和 Fleet 发起轮次的结果。\n\n\
+                                 This agy conversation stores its steps in a format Fleet cannot \
+                                 decode yet; only the prompts and the outcome of Fleet-started turns \
+                                 are shown.",
+                    }],
                 },
-            }));
-        }
+            }),
+        );
     }
     out
 }
+
+/// Change fingerprint of everything the detail transcript is built from: the
+/// conversation database (+WAL), agy's prompt history and Fleet's run records
+/// for the session. Never 0 — 0 is the "start from the beginning" offset
+/// clients seed poll-type sources with.
+fn detail_fingerprint(key: &str, db: Option<&Path>, history: Option<&Path>, runs: &[RunRecord]) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    if let Some(db) = db {
+        db_fingerprint(db).hash(&mut h);
+    }
+    if let Some(p) = history {
+        stat_pair(p).hash(&mut h);
+    }
+    for r in runs.iter().filter(|r| r.session_key() == key) {
+        r.meta.run_id.hash(&mut h);
+        r.meta.ended_ms.hash(&mut h);
+        r.outcome.status.hash(&mut h);
+        r.outcome.conversation_id.hash(&mut h);
+    }
+    h.finish() | 1
+}
+
+/// Tail window re-sent when the fingerprint changes; clients dedup by uuid.
+const TAIL_WINDOW: usize = 60;
 
 // ── launch ───────────────────────────────────────────────────────────────────
 
@@ -762,6 +1010,7 @@ fn launch(
         .stdout(std::process::Stdio::from(stdout))
         .stderr(std::process::Stdio::from(stderr));
     crate::process_util::detach_process_group(&mut cmd);
+    apply_launch_env(&mut cmd, &run_id, l.conversation);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -820,6 +1069,81 @@ fn launch(
     })
 }
 
+/// Identity env for a Fleet-launched agy process. Inherited session ids are
+/// cleared first (the spawner may itself be a Fleet session, and its id would
+/// otherwise win in [`crate::codex_launch::resolve_fleet_session_id_from_env`]
+/// inside agy's MCP children). The run id is always set — the conversation id
+/// of a new turn does not exist yet — and a resume also carries the
+/// conversation as `FLEET_SESSION_ID`.
+fn apply_launch_env(cmd: &mut std::process::Command, run_id: &str, conversation: Option<&str>) {
+    cmd.env_remove("FLEET_SESSION_ID");
+    cmd.env_remove("CLAUDE_CODE_SESSION_ID");
+    cmd.env(crate::agy_hooks::RUN_ENV, run_id);
+    cmd.env("FLEET_AGENT_SOURCE", SOURCE_NAME);
+    if let Some(c) = conversation.map(str::trim).filter(|c| !c.is_empty()) {
+        cmd.env("FLEET_SESSION_ID", c);
+    }
+}
+
+/// Every Fleet run record on this machine, oldest first.
+pub fn runs() -> Option<Vec<RunRecord>> {
+    runs_dir().map(|d| load_runs(&d))
+}
+
+/// The session a Fleet-launched agy process belongs to, from the run id Fleet
+/// put in its env: the conversation once agy has named it, the run's own key
+/// before that. `None` for an unknown run.
+pub fn session_id_for_run(run_id: &str) -> Option<String> {
+    if run_id.is_empty() || run_id.contains(['/', '\\']) || run_id.contains("..") {
+        return None;
+    }
+    let dir = runs_dir()?;
+    let meta: RunMeta =
+        serde_json::from_slice(&std::fs::read(dir.join(format!("{run_id}.json"))).ok()?).ok()?;
+    let out = std::fs::read_to_string(dir.join(format!("{run_id}.out"))).unwrap_or_default();
+    let record = RunRecord {
+        meta,
+        outcome: parse_run_output(&out),
+        stderr_tail: None,
+    };
+    Some(record.session_key())
+}
+
+/// Close out run records whose process is gone but whose end was never
+/// written. The reaper thread lives in the process that launched the turn, so a
+/// turn started by a short-lived `fleet` CLI loses its reaper the moment the CLI
+/// exits. The end time is the output file's mtime (the last thing agy wrote);
+/// the exit code is inferred from the stream — 0 for a clean `result`, 1 for a
+/// failed one, -1 when agy died without one — since the real code is
+/// unrecoverable once nobody waited on the process.
+fn settle_orphan_runs(dir: &Path, runs: &mut [RunRecord], is_alive: &impl Fn(u32) -> bool) {
+    for r in runs.iter_mut() {
+        let Some(pid) = r.meta.pid else { continue };
+        if r.meta.ended_ms.is_some() || is_alive(pid) {
+            continue;
+        }
+        let ended = mtime_ms(&dir.join(format!("{}.out", r.meta.run_id))).unwrap_or_else(now_ms);
+        let code = match &r.outcome {
+            o if o.status.is_none() => -1,
+            o if o.failed() => 1,
+            _ => 0,
+        };
+        let conv = r.outcome.conversation_id.clone();
+        update_meta(dir, &r.meta.run_id, |m| {
+            m.ended_ms.get_or_insert(ended);
+            m.exit_code.get_or_insert(code);
+            if m.conversation_id.is_none() {
+                m.conversation_id = conv.clone();
+            }
+        });
+        r.meta.ended_ms = Some(ended);
+        r.meta.exit_code = Some(code);
+        if r.meta.conversation_id.is_none() {
+            r.meta.conversation_id = conv;
+        }
+    }
+}
+
 fn read_outcome(path: &Path) -> RunOutcome {
     let Ok(f) = std::fs::File::open(path) else {
         return RunOutcome::default();
@@ -875,7 +1199,14 @@ impl AgentSource for AgySource {
             }),
             None => Vec::new(),
         };
-        let runs = runs_dir().map(|d| load_runs(&d)).unwrap_or_default();
+        let runs = match runs_dir() {
+            Some(d) => {
+                let mut runs = load_runs(&d);
+                settle_orphan_runs(&d, &mut runs, &crate::session::is_process_alive);
+                runs
+            }
+            None => Vec::new(),
+        };
         let conversations = home.map(|h| h.join("conversations"));
         build_sessions(
             &summaries,
@@ -886,19 +1217,31 @@ impl AgentSource for AgySource {
     }
 
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String> {
+        let key = key_of(path);
         let runs = runs_dir().map(|d| load_runs(&d)).unwrap_or_default();
-        Ok(detail_messages(key_of(path), &runs))
+        let conv = (!key.starts_with(RUN_ID_PREFIX))
+            .then(|| conversation_db(key))
+            .flatten()
+            .map(|db| conversation(&db, key));
+        let history = history_path().map(|p| read_history(&p)).unwrap_or_default();
+        Ok(detail_messages(key, conv.as_deref(), &history, &runs))
     }
 
-    /// The detail "transcript" is rebuilt from run records each time, so the
-    /// offset is a message count rather than a byte position.
+    /// The transcript is rebuilt from several stores, so the offset is a
+    /// change fingerprint rather than a byte position: unchanged → nothing;
+    /// changed → the last [`TAIL_WINDOW`] messages, which clients dedup by
+    /// their stable uuids (the Codex follow model).
     fn tail_incremental(&self, path: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
-        let all = self.get_messages(path)?;
-        let len = all.len() as u64;
-        if offset >= len {
-            return Ok((Vec::new(), len));
+        let key = key_of(path);
+        let runs = runs_dir().map(|d| load_runs(&d)).unwrap_or_default();
+        let db = (!key.starts_with(RUN_ID_PREFIX)).then(|| conversation_db(key)).flatten();
+        let fp = detail_fingerprint(key, db.as_deref(), history_path().as_deref(), &runs);
+        if fp == offset {
+            return Ok((Vec::new(), fp));
         }
-        Ok((all[offset as usize..].to_vec(), len))
+        let all = self.get_messages(path)?;
+        let start = all.len().saturating_sub(TAIL_WINDOW);
+        Ok((all[start..].to_vec(), fp))
     }
 
     fn watch_strategy(&self) -> WatchStrategy {
@@ -1002,6 +1345,77 @@ mod tests {
         assert_eq!(rows[1].status, "CASCADE_RUN_STATUS_IDLE");
     }
 
+    fn orphan_meta(run_id: &str, pid: u32) -> RunMeta {
+        RunMeta {
+            run_id: run_id.to_string(),
+            kind: "new".to_string(),
+            workspace: "/w".to_string(),
+            prompt: "hi".to_string(),
+            started_ms: 1,
+            pid: Some(pid),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn orphan_runs_get_an_end_and_an_inferred_exit_code() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let cases = [
+            ("ok", 11, r#"{"type":"init","conversation_id":"c-ok"}
+{"type":"result","status":"SUCCESS","conversation_id":"c-ok","response":"done"}"#),
+            ("bad", 12, r#"{"type":"result","status":"ERROR","conversation_id":"","error":"not eligible"}"#),
+            ("died", 13, r#"{"type":"init","conversation_id":"c-died"}"#),
+            ("alive", 14, ""),
+        ];
+        for (id, pid, out) in cases {
+            write_meta(dir, &orphan_meta(id, pid)).unwrap();
+            std::fs::write(dir.join(format!("{id}.out")), out).unwrap();
+        }
+        let mut runs = load_runs(dir);
+        settle_orphan_runs(dir, &mut runs, &|pid| pid == 14);
+
+        let reloaded = load_runs(dir);
+        let by = |id: &str| reloaded.iter().find(|r| r.meta.run_id == id).unwrap().meta.clone();
+        assert_eq!(by("ok").exit_code, Some(0));
+        assert_eq!(by("ok").conversation_id.as_deref(), Some("c-ok"));
+        assert_eq!(by("bad").exit_code, Some(1));
+        assert_eq!(by("died").exit_code, Some(-1));
+        assert_eq!(by("died").conversation_id.as_deref(), Some("c-died"));
+        for id in ["ok", "bad", "died"] {
+            assert!(by(id).ended_ms.is_some(), "{id} must be closed out on disk");
+        }
+        assert_eq!(by("alive").ended_ms, None, "a live pid is left to its reaper");
+        assert!(runs.iter().all(|r| r.meta.run_id == "alive" || r.meta.ended_ms.is_some()));
+    }
+
+    #[test]
+    fn settled_runs_keep_a_reaper_written_exit_code() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let mut meta = orphan_meta("r", 21);
+        meta.ended_ms = Some(5);
+        meta.exit_code = Some(3);
+        write_meta(dir, &meta).unwrap();
+        let mut runs = load_runs(dir);
+        settle_orphan_runs(dir, &mut runs, &|_| false);
+        assert_eq!(load_runs(dir)[0].meta.exit_code, Some(3));
+    }
+
+    #[test]
+    fn launch_env_carries_the_run_and_drops_inherited_ids() {
+        let probe = "printf '%s|%s|%s' \"${FLEET_AGY_RUN:-E}\" \"${FLEET_SESSION_ID:-E}\" \"${CLAUDE_CODE_SESSION_ID:-E}\"";
+        let run = |conv: Option<&str>| {
+            let mut cmd = std::process::Command::new("/bin/sh");
+            cmd.arg("-c").arg(probe);
+            cmd.env("FLEET_SESSION_ID", "leaked").env("CLAUDE_CODE_SESSION_ID", "leaked");
+            apply_launch_env(&mut cmd, "run-1", conv);
+            String::from_utf8(cmd.output().unwrap().stdout).unwrap()
+        };
+        assert_eq!(run(None), "run-1|E|E");
+        assert_eq!(run(Some("conv-9")), "run-1|conv-9|E");
+    }
+
     #[test]
     fn missing_and_empty_databases_are_empty_lists() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1077,10 +1491,120 @@ mod tests {
         // Without the Fleet entrypoint the task page (and the phone) hide it.
         assert_eq!(s.entrypoint.as_deref(), Some("claw-fleet-newsession"));
 
-        let msgs = detail_messages("agy-run-r1", &[r]);
+        let msgs = detail_messages("agy-run-r1", None, &[], &[r]);
         let text = serde_json::to_string(&msgs).unwrap();
-        assert!(text.contains("暂不支持"), "placeholder notice");
+        assert!(!text.contains("暂不支持"), "the phase-1 placeholder is gone");
+        assert_eq!(msgs.len(), 2, "prompt + raw outcome: {text}");
+        assert_eq!(msgs[0]["message"]["content"], "say hi");
         assert!(text.contains("Eligibility check failed"), "raw error in detail");
+    }
+
+    fn conv_fixture(dir: &Path, id: &str) -> PathBuf {
+        use crate::agy_conv::fixture::*;
+        let conv = dir.join("conversations");
+        std::fs::create_dir_all(&conv).unwrap();
+        let db = conv.join(format!("{id}.db"));
+        conversation_db(
+            &db,
+            &[
+                (0, 3, step(3, 1_795_000_000_000, 19, &sf(1, "fix the build"), &[])),
+                (1, 3, step(3, 1_795_000_005_000, 20, &sf(1, "Done, it builds."), &[])),
+            ],
+            &[generation(
+                None,
+                Some("gemini-4-neon-high"),
+                1_000_000,
+                0,
+                1_000_000,
+                1_000_000,
+                0,
+                "resp-1",
+                Some(1_795_000_004_000),
+            )],
+        );
+        db
+    }
+
+    #[test]
+    fn scan_overlays_tokens_cost_model_and_preview_from_the_conversation_db() {
+        let tmp = tempfile::tempdir().unwrap();
+        conv_fixture(tmp.path(), "c-tok");
+        let row = SummaryRow {
+            conversation_id: "c-tok".into(),
+            workspace_path: Some("/tmp/ws".into()),
+            ..Default::default()
+        };
+        let sessions = build_sessions(&[row], Some(&tmp.path().join("conversations")), &[], |_| false);
+        let s = &sessions[0];
+        assert_eq!(s.total_input_tokens, 1_000_000);
+        assert_eq!(s.total_output_tokens, 1_000_000);
+        assert_eq!(s.model.as_deref(), Some("gemini-4-neon-high"));
+        assert!((s.total_cost_usd - 18.0).abs() < 1e-9, "neon $3 + $15: {}", s.total_cost_usd);
+        assert_eq!(s.last_message_preview.as_deref(), Some("Done, it builds."));
+        assert!(s.last_activity_ms >= 1_795_000_004_000);
+    }
+
+    #[test]
+    fn detail_prefers_decoded_steps_and_keeps_fleet_run_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = conv_fixture(tmp.path(), "c-steps");
+        let conv = conversation(&db, "c-steps");
+        let mut failed = run("r9", 1_795_000_010_000, INELIGIBLE);
+        failed.meta.conversation_id = Some("c-steps".into());
+        let msgs = detail_messages("c-steps", Some(&conv), &[], &[failed]);
+        assert_eq!(msgs.len(), 3, "{msgs:#?}");
+        assert_eq!(msgs[0]["uuid"], "agy:c-steps:step:0");
+        assert_eq!(msgs[1]["message"]["content"][0]["text"], "Done, it builds.");
+        assert!(msgs[2]["message"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Eligibility"));
+    }
+
+    #[test]
+    fn without_steps_the_detail_merges_history_and_runs_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let hist = tmp.path().join("history.jsonl");
+        std::fs::write(
+            &hist,
+            concat!(
+                r#"{"display":"/model","timestamp":1,"type":"slash_command"}"#, "\n",
+                r#"{"display":"say hi","timestamp":1500,"workspace":"/tmp/ws","conversationId":"c-h"}"#, "\n",
+                r#"{"display":"older","timestamp":500,"workspace":"/tmp/ws","conversationId":"c-h"}"#, "\n",
+                r#"{"display":"other conv","timestamp":600,"conversationId":"c-x"}"#, "\n",
+                r#"{"display":"no conv","timestamp":700}"#, "\n",
+            ),
+        )
+        .unwrap();
+        let history = read_history(&hist);
+        assert_eq!(history.len(), 3, "slash commands and conversation-less lines dropped");
+        let mut r = run("r10", 1_000, INELIGIBLE);
+        r.meta.conversation_id = Some("c-h".into());
+        let msgs = detail_messages("c-h", None, &history, &[r]);
+        let texts: Vec<String> = msgs
+            .iter()
+            .map(|m| m["message"]["content"].to_string())
+            .collect();
+        assert_eq!(msgs.len(), 3, "{texts:?}");
+        assert!(texts[0].contains("older"));
+        assert!(texts[1].contains("say hi"), "the run prompt duplicates history and shows once");
+        assert!(texts[2].contains("Eligibility"));
+    }
+
+    #[test]
+    fn tail_fingerprint_changes_with_the_wal_and_is_never_zero() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = conv_fixture(tmp.path(), "c-fp");
+        let a = detail_fingerprint("c-fp", Some(&db), None, &[]);
+        assert_ne!(a, 0);
+        assert_eq!(a, detail_fingerprint("c-fp", Some(&db), None, &[]));
+        std::fs::write(wal_path(&db), b"grown").unwrap();
+        assert_ne!(a, detail_fingerprint("c-fp", Some(&db), None, &[]));
+        let r = run("r11", 1, "");
+        assert_ne!(
+            detail_fingerprint("agy-run-r11", None, None, &[]),
+            detail_fingerprint("agy-run-r11", None, None, &[r])
+        );
     }
 
     #[test]

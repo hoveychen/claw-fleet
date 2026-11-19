@@ -317,6 +317,12 @@ enum Commands {
     /// injects what this workspace has been worked on lately
     #[command(name = "recent-sessions", hide = true)]
     RecentSessions,
+    /// [internal] Antigravity CLI (agy) hook — answers one agy hook event (stdin JSON in, JSON out)
+    #[command(name = "agy-hook", hide = true)]
+    AgyHook {
+        /// The hook event, kebab-case (`session-start`).
+        event: String,
+    },
     /// [internal] dsh plugin content source — the sections to inject on one `agent/pre-step`
     #[command(hide = true)]
     DshContext {
@@ -1782,6 +1788,14 @@ fn main() {
         },
         Commands::Elicitation => commands::guard::cmd_elicitation(),
         Commands::Mcp => commands::guard::cmd_mcp(),
+        Commands::AgyHook { event } => {
+            use std::io::Read;
+            let mut input = String::new();
+            let _ = std::io::stdin().read_to_string(&mut input);
+            let payload = serde_json::from_str(&input).unwrap_or(serde_json::Value::Null);
+            let out = claw_fleet_core::agy_hooks::handle_hook(&event, &payload);
+            println!("{out}");
+        }
         Commands::ParkedInterrupt {
             session,
             tool_use_id,

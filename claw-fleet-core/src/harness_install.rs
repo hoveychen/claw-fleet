@@ -28,6 +28,10 @@ const CLAUDE_INSTALL_SH: &str = "https://claude.ai/install.sh";
 const CLAUDE_INSTALL_PS1: &str = "https://claude.ai/install.ps1";
 const CODEX_INSTALL_SH: &str = "https://chatgpt.com/codex/install.sh";
 const CODEX_INSTALL_PS1: &str = "https://chatgpt.com/codex/install.ps1";
+/// Antigravity CLI's documented installer (the Homebrew cask
+/// `antigravity-cli` is the other official channel). Unix only: no Windows
+/// installer is documented.
+const AGY_INSTALL_SH: &str = "https://antigravity.google/cli/install.sh";
 const DSH_NPM_PACKAGE: &str = "@deepseek-ai/dsh";
 
 /// Network installs legitimately run minutes (npm's dsh tree is ~300 MB); this
@@ -102,11 +106,26 @@ pub fn install_plan(source: &str) -> Result<InstallPlan, InstallError> {
             &[("CODEX_NON_INTERACTIVE", "1")],
         )),
         "dsh" => dsh_install_plan(),
+        "agy" => agy_install_plan(),
         other => Err(InstallError::new(
             InstallErrorCode::UnsupportedSource,
             format!("unknown harness source '{other}'"),
         )),
     }
+}
+
+fn agy_install_plan() -> Result<InstallPlan, InstallError> {
+    if cfg!(windows) {
+        return Err(InstallError::new(
+            InstallErrorCode::UnsupportedSource,
+            "Antigravity CLI documents no Windows installer".to_string(),
+        ));
+    }
+    Ok(InstallPlan {
+        program: "sh".into(),
+        args: vec!["-c".into(), format!("curl -fsSL '{AGY_INSTALL_SH}' | bash")],
+        envs: vec![],
+    })
 }
 
 /// `curl | sh` on unix, `irm | iex` under PowerShell on Windows — exactly the
@@ -419,6 +438,19 @@ pub fn update_plan(
             }),
         },
         "dsh" => npm_global_latest_plan(DSH_NPM_PACKAGE),
+        "agy" => match channel.unwrap_or("path") {
+            "homebrew" => Ok(InstallPlan {
+                program: "brew".into(),
+                args: vec!["upgrade".into(), "--cask".into(), "antigravity-cli".into()],
+                envs: vec![],
+            }),
+            // `agy update` is the CLI's own updater (listed in `agy help`, 1.5.12).
+            _ => Ok(InstallPlan {
+                program: bin("agy"),
+                args: vec!["update".into()],
+                envs: vec![],
+            }),
+        },
         other => Err(InstallError::new(
             InstallErrorCode::UnsupportedSource,
             format!("unknown harness source '{other}'"),
@@ -696,6 +728,21 @@ mod tests {
             codex.envs,
             vec![("CODEX_NON_INTERACTIVE".to_string(), "1".to_string())]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agy_plans_use_the_vendor_channels() {
+        let install = install_plan("agy").unwrap();
+        assert_eq!(install.program, "sh");
+        assert_eq!(
+            install.args[1],
+            "curl -fsSL 'https://antigravity.google/cli/install.sh' | bash"
+        );
+        let brew = update_plan("agy", Some("homebrew"), Some("/opt/homebrew/bin/agy")).unwrap();
+        assert_eq!(brew.args, vec!["upgrade", "--cask", "antigravity-cli"]);
+        let own = update_plan("agy", Some("path"), Some("/x/agy")).unwrap();
+        assert_eq!((own.program.as_str(), own.args.clone()), ("/x/agy", vec!["update".to_string()]));
     }
 
     #[test]
