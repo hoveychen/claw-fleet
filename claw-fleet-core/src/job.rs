@@ -17,10 +17,12 @@
 //! needs on top: a bounded blocking [`wait`] and a plain-text rendering with the
 //! ANSI-stripped tail of the output.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::proc_runner::{self, ProcRecord, ProcStatus};
+use crate::resource_queue::{self, JobQueue, Nesting, Priority, QueueEnd};
 
 /// Longest a single [`wait`] blocks. Below the 600s ceiling of a foreground
 /// `Bash` call (so `fleet job wait` fits in one) with headroom for the tail read.
@@ -39,21 +41,60 @@ const JOB_ROWS: u16 = 50;
 
 const WAIT_POLL: Duration = Duration::from_millis(500);
 
+/// The resources a job declares ([`crate::resource_queue`]). The default —
+/// no `needs` — is a plain job that starts at once.
+#[derive(Debug, Clone, Default)]
+pub struct RunOptions {
+    /// Resource name → units. The command starts only once every one of them
+    /// is granted to the job, all at the same time.
+    pub needs: BTreeMap<String, u32>,
+    pub priority: Priority,
+    /// Give up after this long in the queue: the job then ends without its
+    /// command ever running, with [`resource_queue::EXIT_QUEUE_TIMEOUT`].
+    pub max_wait: Option<Duration>,
+}
+
 /// Start `command` in `workspace` as a detached job. `host_exe` is the binary
 /// that intercepts [`proc_runner::HOST_ARGV_MARKER`] (the caller's own exe).
 /// `owner` is the calling session: an incognito one keeps its jobs in its
 /// private dir ([`proc_runner::require_dir_for`]).
+///
+/// With `opts.needs`, the job's host queues for those resources before it
+/// starts the command (status [`ProcStatus::Queued`] meanwhile). A request
+/// that could never be granted, or a nested one for something the enclosing
+/// grant does not hold, is refused here, before anything is spawned.
 pub fn run(
     host_exe: &Path,
     workspace: &str,
     command: &str,
     owner: Option<&str>,
+    opts: &RunOptions,
 ) -> Result<ProcRecord, String> {
     if command.trim().is_empty() {
         return Err("command is empty".into());
     }
+    let queue = if opts.needs.is_empty() {
+        None
+    } else {
+        let inherited_from = match resource_queue::check_nested(&opts.needs)? {
+            Nesting::Inherited(outer) => Some(outer),
+            Nesting::TopLevel => {
+                resource_queue::check_fits(&opts.needs)?;
+                None
+            }
+        };
+        Some(JobQueue {
+            needs: opts.needs.clone(),
+            priority: opts.priority,
+            max_wait_ms: opts.max_wait.map(|d| d.as_millis() as u64),
+            session_id: owner.map(str::to_string),
+            inherited_from,
+            granted_ms: None,
+            end: None,
+        })
+    };
     let dir = proc_runner::require_dir_for(owner)?;
-    proc_runner::spawn_proc_in(&dir, host_exe, workspace, command, JOB_COLS, JOB_ROWS)
+    proc_runner::spawn_proc_queued_in(&dir, host_exe, workspace, command, JOB_COLS, JOB_ROWS, queue)
 }
 
 pub fn is_done(rec: &ProcRecord) -> bool {
@@ -187,12 +228,52 @@ fn fmt_duration(ms: u64) -> String {
     }
 }
 
-/// One-line status: `running for 3m02s` / `exited 0 after 12m03s`.
+/// One-line status: `running for 3m02s` / `exited 0 after 12m03s` /
+/// `queued for 40s, needs test-db`.
 pub fn status_line(rec: &ProcRecord) -> String {
-    let elapsed = rec.finished_ms.unwrap_or_else(now_ms).saturating_sub(rec.started_ms);
+    let end = rec.finished_ms.unwrap_or_else(now_ms);
+    let queue = rec.queue.as_ref();
+    // A job that queued has two clocks: time in the queue, then time running.
+    let granted_ms = queue.and_then(|q| q.granted_ms);
+    let elapsed = end.saturating_sub(granted_ms.unwrap_or(rec.started_ms));
+    let queued_note = match granted_ms {
+        Some(g) if g.saturating_sub(rec.started_ms) >= 1000 => {
+            format!(" (queued {} first)", fmt_duration(g - rec.started_ms))
+        }
+        _ => String::new(),
+    };
+    let needs = queue
+        .map(|q| resource_queue::format_needs(&q.needs))
+        .unwrap_or_default();
+    // Ended in the queue: the command never ran, and the exit code is Fleet's.
+    if let (ProcStatus::Exited, Some(q)) = (rec.status, queue) {
+        let code = rec.exit_code.unwrap_or(-1);
+        let waited = fmt_duration(end.saturating_sub(rec.started_ms));
+        match q.end {
+            Some(QueueEnd::Timeout) => {
+                return format!(
+                    "queue timeout: gave up after {waited} waiting for {needs} (--max-wait) — \
+                     the command never ran; exit {code}"
+                )
+            }
+            Some(QueueEnd::Cancelled) => {
+                return format!(
+                    "cancelled after {waited} in the queue for {needs} — the command never ran; exit {code}"
+                )
+            }
+            Some(QueueEnd::Rejected) => {
+                return format!("resource request for {needs} refused — the command never ran; exit {code}")
+            }
+            None => {}
+        }
+    }
     match (rec.status, rec.exit_code) {
+        (ProcStatus::Queued, _) => format!(
+            "queued for {}, needs {needs} — the command has not started",
+            fmt_duration(end.saturating_sub(rec.started_ms))
+        ),
         (ProcStatus::Exited, Some(code)) => {
-            format!("exited {code} after {}", fmt_duration(elapsed))
+            format!("exited {code} after {}{queued_note}", fmt_duration(elapsed))
         }
         // The host died without reporting (kill -9, crash, reboot) — the exit
         // was inferred, not observed.
@@ -201,8 +282,26 @@ pub fn status_line(rec: &ProcRecord) -> String {
             fmt_duration(elapsed)
         ),
         (ProcStatus::Starting, _) => "starting".into(),
-        (ProcStatus::Running, _) => format!("running for {}", fmt_duration(elapsed)),
+        (ProcStatus::Running, _) => {
+            format!("running for {}{queued_note}", fmt_duration(elapsed))
+        }
     }
+}
+
+/// For a queued job: its place in the queue and what it is waiting on —
+/// `queue: #2 of 3 — waiting on test-db (held by p1a2b)`.
+fn queue_line(rec: &ProcRecord) -> Option<String> {
+    if rec.status != ProcStatus::Queued {
+        return None;
+    }
+    let snap = resource_queue::snapshot().ok()?;
+    let mine = snap.queue.iter().find(|q| q.request.id == rec.id)?;
+    Some(format!(
+        "queue: #{} of {} — waiting on {}\n",
+        mine.position,
+        snap.queue.len(),
+        resource_queue::describe_wait(&mine.wait_on)
+    ))
 }
 
 /// Agent-facing report: id, status, command, log path and the output tail.
@@ -217,6 +316,9 @@ pub fn render(rec: &ProcRecord, tail_lines: usize) -> String {
         rec.command,
         rec.workspace_path
     );
+    if let Some(line) = queue_line(rec) {
+        out.push_str(&line);
+    }
     let n = tail_lines.min(MAX_TAIL_LINES);
     if n > 0 {
         let tail = std::fs::read(&log)
@@ -310,10 +412,49 @@ mod tests {
             finished_ms: Some(725_000),
             cols: 80,
             rows: 24,
+            queue: None,
         };
         assert_eq!(status_line(&rec), "exited 3 after 12m05s");
         rec.exit_code = None;
         assert!(status_line(&rec).contains("unknown status"));
+    }
+
+    #[test]
+    fn status_line_tells_queued_running_and_queue_endings_apart() {
+        let mut rec = exited("pq");
+        rec.exit_code = None;
+        rec.finished_ms = None;
+        rec.started_ms = now_ms().saturating_sub(40_000);
+        rec.status = ProcStatus::Queued;
+        rec.queue = Some(JobQueue {
+            needs: resource_queue::parse_needs(&["test-db", "gpu:2"]).unwrap(),
+            ..JobQueue::default()
+        });
+        let line = status_line(&rec);
+        assert!(line.starts_with("queued for 4"), "{line}");
+        assert!(line.contains("gpu:2, test-db"), "{line}");
+        assert!(!is_done(&rec), "a queued job is not done");
+
+        // Granted after 30s in the queue: the running clock starts at the grant.
+        rec.status = ProcStatus::Running;
+        rec.queue.as_mut().unwrap().granted_ms = Some(rec.started_ms + 30_000);
+        let line = status_line(&rec);
+        assert!(line.starts_with("running for 1"), "{line}");
+        assert!(line.contains("(queued 30s first)"), "{line}");
+
+        rec.status = ProcStatus::Exited;
+        rec.finished_ms = Some(rec.started_ms + 40_000);
+        rec.exit_code = Some(resource_queue::EXIT_QUEUE_TIMEOUT);
+        let q = rec.queue.as_mut().unwrap();
+        q.granted_ms = None;
+        q.end = Some(QueueEnd::Timeout);
+        let line = status_line(&rec);
+        assert!(line.starts_with("queue timeout"), "{line}");
+        assert!(line.contains("never ran; exit 75"), "{line}");
+
+        rec.queue.as_mut().unwrap().end = Some(QueueEnd::Cancelled);
+        rec.exit_code = Some(resource_queue::EXIT_QUEUE_CANCELLED);
+        assert!(status_line(&rec).starts_with("cancelled after 40s"), "{}", status_line(&rec));
     }
 
     #[test]
@@ -352,6 +493,7 @@ mod tests {
             finished_ms: Some(2),
             cols: 80,
             rows: 24,
+            queue: None,
         }
     }
 
@@ -428,6 +570,7 @@ mod tests {
             finished_ms: None,
             cols: 80,
             rows: 24,
+            queue: None,
         };
         write(dir.path(), &rec);
 
@@ -469,6 +612,7 @@ mod tests {
             finished_ms: None,
             cols: 80,
             rows: 24,
+            queue: None,
         };
         write(dir.path(), &rec);
 

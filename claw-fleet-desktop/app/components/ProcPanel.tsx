@@ -456,6 +456,11 @@ export function ProcPanel({
 
 function statusLabel(p: ProcRecord, t: (k: string, o?: Record<string, unknown>) => string): string {
   if (p.status === "starting") return t("files.proc_starting");
+  // Waiting in the resource queue: the command has not started yet.
+  if (p.status === "queued") {
+    const needs = Object.keys(p.queue?.needs ?? {}).join(", ");
+    return `${t("files.proc_queued")}${needs ? ` · ${needs}` : ""} · ${fmtDuration(Date.now() - p.startedMs)}`;
+  }
   if (p.status === "running") return `${t("files.proc_running")} · ${fmtDuration(Date.now() - p.startedMs)}`;
   const exited =
     p.exitCode !== undefined

@@ -2797,6 +2797,7 @@
     "proc_execution": "Execution",
     "proc_running": "Running",
     "proc_starting": "Starting",
+    "proc_queued": "Queued for resources",
     "proc_exited": "Exited ({{code}})",
     "proc_exited_unknown": "Exited",
     "proc_took": "took {{d}}",

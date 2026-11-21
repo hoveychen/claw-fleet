@@ -19,8 +19,9 @@ pub(crate) fn cmd_job(action: JobCommands) {
                 .unwrap_or(true);
             std::process::exit(if done { 0 } else { 1 });
         }
-        JobCommands::Run { command, cwd, wake } => {
-            json!({"action":"run","command":command,"cwd":cwd,"wake":wake})
+        JobCommands::Run { command, cwd, wake, need, priority, max_wait } => {
+            json!({"action":"run","command":command,"cwd":cwd,"wake":wake,
+                   "need":need,"priority":priority,"max_wait":max_wait})
         }
         JobCommands::Wait { id, timeout, tail } => {
             json!({"action":"wait","id":id,"timeout":timeout,"tail":tail})
