@@ -314,21 +314,17 @@ later baton sees.\n\
 `ok: handoff registered`, then end the turn. **Narrating a handoff in prose \
 does nothing** — only the actual command spawns a successor.\n\
 \n\
-**You do not have to judge \"running long\" by feel.** Fleet measures your \
-context from this session's own log and injects one `[Fleet] 上下文已用 …K` \
-message each time you cross 250K / 500K / 750K prompt tokens (once per tier; a \
-compaction re-arms them). **Treat the first one as the cue to prepare a \
-handoff** — past ~250K a model starts to blur: it forgets constraints it set \
-itself, redoes investigations, quotes its own summary as the original. A relay \
-buys back a clear head; it is not a loss, so do not read those messages as a \
-remaining-budget meter.\n\
+**You need not judge \"running long\" by feel:** Fleet injects `[Fleet] \
+上下文已用 …K` at 250K / 500K / 750K prompt tokens. **Treat the first as the \
+cue to prepare a handoff** — past ~250K a model blurs (forgets its own \
+constraints, redoes work). A relay buys back a clear head; it is not a loss.\n\
 \n\
 ## Rule 6 — Waiting on an external condition (`fleet watch`)\n\
 \n\
 Handoff continues *work*; `fleet watch` waits for an *event* — a CI run \
-finishing, a build producing an artifact, a deploy going live. Do NOT sit in \
-a foreground poll loop or a background job waiting for it: a Fleet turn ends \
-and anything still waiting is lost. Register a watch and end the turn:\n\
+finishing, a build producing an artifact, a deploy going live. Do NOT poll for \
+it in the foreground or a background job — a Fleet turn ends and the wait is \
+lost. Register a watch and end the turn:\n\
 \n\
 ```\n\
 fleet watch create --until \"<shell cmd that exits 0 when done>\" --capture \"<shell cmd whose stdout to report>\" --note \"<what you await>\" --session <your session id>\n\
@@ -347,33 +343,32 @@ every poll. Keep the `until` side-effect free — start any recording or \
 download yourself before registering and let the `until` assert on its output. \
 If you know roughly when it should hold, pass `--expect-by <8h | \"2026-09-23 \
 14:30\">`: past that point Fleet wakes you once to check while the watch keeps \
-running. When the wait is countable (steps done, items processed, jobs green), \
-pass `--progress '<command>'`: its first stdout line (`3/8`, `42%` or a short \
-status) is shown to the boss as live progress on every poll — display only, it \
-never fires or wakes you.\n\
+running. A countable wait takes `--progress '<command>'`: its first stdout \
+line (`3/8`, `42%`) is shown to the boss as live progress (display only).\n\
 - **Waiting on other sessions to finish** (ones you spawned, a sibling, a \
 handoff chain) is a watch too: `fleet watch create --sessions <id1>,<id2> \
 [--mode all|any] --note \"<what you await>\" --session <your session id>` \
-instead of `--until` (`--sessions` = whom you wait on, `--session` = you). It \
-waits on claude / codex / dsh sessions alike, follows a target that handed off \
-to the end of its chain, does not count a target parked on a decision card as \
-finished, keeps waiting through rate limits / 5xx / network drops that Fleet \
-retries, and wakes you at once with the reason on a real failure (403, process \
-died mid-turn, retries exhausted). `fleet watch add/remove <watch-id> <session \
-ids…>` changes the set. Never write a shell loop that polls another session's \
-transcript or `fleet inspect` — it holds a foreground tool call and the boss's \
-follow-ups cannot reach you.\n\
-- Pick the scheduling relay by *need*:**repeat periodically (cron) → \
-`fleet loop`** (CLI alias `fleet cron`; Fleet-managed, durable, spawns a fresh \
-session each interval); **fire once at a future time → `fleet schedule`** \
-(`--at`/`--in`); **wait for an event then continue → `fleet watch`** (above).\n\
-- Both `fleet loop` and `fleet schedule` take a `--title <a few words>`: always \
-pass one on create, else the scheduled-task list can only show the first lines \
-of the prompt.\n\
-- Both also take an optional `--until <shell cmd>` \
-as a **cheap non-LLM gate** — a probe run each tick (or once due) that spawns \
-the paid LLM session only when it exits 0. Poll often, pay for an LLM only \
-when there is real work. Do NOT default to an LLM session every tick.\n\
+instead of `--until` (`--sessions` = whom you wait on, `--session` = you). Any \
+engine; handoff chains are followed, a target parked on a card is not done, \
+retried rate limits / 5xx keep it waiting, and a real failure wakes you at once \
+with the reason. `fleet watch add/remove <watch-id> <ids…>` changes the set. \
+Never poll another session's transcript or `fleet inspect` from a shell loop — \
+the boss's follow-ups cannot reach you meanwhile.\n\
+- **Something needing exclusive use** (test DB, port, device, e2e env, GPU) → \
+`fleet job run --need test-db --need gpu:1 -- <cmd>` (foreground: `fleet \
+resource run --need …`), **declaring every resource at once**: Fleet queues it \
+machine-wide, starts it when all are granted, releases them when it ends or \
+its holder dies; `fleet resource ls` shows holders and waiters. **Never \
+hand-roll lock files or ask other sessions by message** — that is how sessions \
+deadlock. A nested request for an undeclared resource is refused.\n\
+- Pick the scheduling relay by *need*: **repeat periodically (cron) → \
+`fleet loop`** (alias `fleet cron`; durable, a fresh session each interval); \
+**fire once later → `fleet schedule`** (`--at`/`--in`); **wait for an event \
+then continue → `fleet watch`** (above).\n\
+- Both take `--title <a few words>` (always pass one, else the task list shows \
+only the prompt's first lines) and an optional `--until <shell cmd>`: a \
+**cheap non-LLM gate** run each tick (or once due) that spawns the paid LLM \
+session only when it exits 0. Do NOT default to an LLM session every tick.\n\
 \n\
 ### Before a long run: preflight the wall clock\n\
 \n\
@@ -1167,6 +1162,21 @@ mod tests {
         let g = render_dsh_interaction_block("Boss", "zh");
         assert!(g.contains("fleet task set --goal") && g.contains("fleet task split"), "{g}");
         assert!(!g.contains("--type"), "agents no longer label the type: {g}");
+    }
+
+    #[test]
+    fn prd_block_routes_exclusive_use_through_the_resource_queue() {
+        for locale in ["zh", "en"] {
+            let g = render_dsh_prd_block("Boss", locale);
+            for needle in [
+                "fleet job run --need",
+                "declaring every resource",
+                "Never hand-roll lock files",
+                "fleet resource ls",
+            ] {
+                assert!(g.contains(needle), "[{locale}] missing {needle:?}");
+            }
+        }
     }
 
     #[test]
