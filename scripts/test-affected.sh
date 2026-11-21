@@ -59,6 +59,19 @@ MOBILE_GUARD_TESTS=(
 )
 # Crates whose tests CI runs and that build on claw-fleet-core.
 CORE_DEPENDENTS=(fleet-cli fleet-hooks-server)
+# Integration tests in another crate that drive a core module end to end, as
+# `<changed file>|<crate dir>|<test name>`. The resource queue's multi-process
+# properties are only proven by fleet-cli's e2e test.
+CROSS_CRATE_TESTS=(
+  "claw-fleet-core/src/resource_queue.rs|fleet-cli|resource_queue_e2e"
+  "claw-fleet-core/src/job.rs|fleet-cli|resource_queue_e2e"
+  "claw-fleet-core/src/proc_runner.rs|fleet-cli|resource_queue_e2e"
+)
+# Shell test suites, as `<changed file>|<suite>`.
+SCRIPT_TESTS=(
+  "scripts/cargo-jobs-guard.sh|scripts/tests/cargo-jobs-guard.test.sh"
+  "scripts/tests/cargo-jobs-guard.test.sh|scripts/tests/cargo-jobs-guard.test.sh"
+)
 
 base="main"
 dry_run=0
@@ -115,6 +128,15 @@ for f in $changed; do
   contains "$crate" "${rust_crates[@]+"${rust_crates[@]}"}" || rust_crates+=("$crate")
 done
 
+# `<crate dir> <test>` lines selected by CROSS_CRATE_TESTS.
+cross_tests=""
+for entry in "${CROSS_CRATE_TESTS[@]}"; do
+  file="${entry%%|*}"; rest="${entry#*|}"
+  printf '%s\n' "$changed" | grep -qxF "$file" || continue
+  [ -f "${rest%%|*}/tests/${rest#*|}.rs" ] && cross_tests="$cross_tests${rest%%|*} ${rest#*|}"$'\n'
+done
+cross_tests_for() { printf '%s' "$cross_tests" | awk -v c="$1" '$1 == c { print $2 }' | sort -u; }
+
 for crate in "${rust_crates[@]+"${rust_crates[@]}"}"; do
   pkg="$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$crate/Cargo.toml" | head -1)"
   if [ -f "$crate/src/lib.rs" ]; then target="--lib"; else target="--bins"; fi
@@ -137,6 +159,7 @@ for crate in "${rust_crates[@]+"${rust_crates[@]}"}"; do
     filters+=("${CORE_GUARD_FILTERS[@]}")
     tests+=("${CORE_GUARD_TESTS[@]}")
   fi
+  for t in $(cross_tests_for "$crate"); do tests+=("$t"); done
 
   if [ "$whole" = 1 ]; then
     run cargo test -p "$pkg" "$target"
@@ -148,6 +171,24 @@ for crate in "${rust_crates[@]+"${rust_crates[@]}"}"; do
     for t in $(printf '%s\n' "${tests[@]}" | sort -u); do args+=(--test "$t"); done
     run cargo test -p "$pkg" "${args[@]}"
   fi
+done
+
+# Cross-crate tests whose crate had no change of its own.
+for crate in $(printf '%s' "$cross_tests" | awk '{ print $1 }' | sort -u); do
+  contains "$crate" "${rust_crates[@]+"${rust_crates[@]}"}" && continue
+  pkg="$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$crate/Cargo.toml" | head -1)"
+  args=()
+  for t in $(cross_tests_for "$crate"); do args+=(--test "$t"); done
+  run cargo test -p "$pkg" "${args[@]}"
+done
+
+# ── Shell test suites ───────────────────────────────────────────────────────
+suites=""
+for entry in "${SCRIPT_TESTS[@]}"; do
+  printf '%s\n' "$changed" | grep -qxF "${entry%%|*}" && suites="$suites${entry#*|}"$'\n'
+done
+for suite in $(printf '%s' "$suites" | sort -u); do
+  run bash "$suite"
 done
 
 if contains claw-fleet-core "${rust_crates[@]+"${rust_crates[@]}"}"; then

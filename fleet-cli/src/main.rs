@@ -1768,7 +1768,8 @@ fn refuse_in_incognito() {
     let Some(sub) = std::env::args().nth(1) else {
         return;
     };
-    if !claw_fleet_core::incognito::cli_allows(&sub) {
+    let action = std::env::args().nth(2);
+    if !claw_fleet_core::incognito::cli_allows(&sub, action.as_deref()) {
         eprintln!("{}", claw_fleet_core::incognito::cli_refusal(&sub));
         std::process::exit(1);
     }

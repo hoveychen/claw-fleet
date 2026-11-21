@@ -12,8 +12,9 @@
 //!   for.
 //! * **no starvation** — a request at the head needing two resources is not
 //!   overtaken by later requests for the one that happens to be free.
-//! * **dead holders** — a SIGKILLed holder (foreground or job host) is reaped
-//!   and the next waiter proceeds.
+//! * **dead holders** — a SIGKILLed holder (foreground or job host) is reaped,
+//!   the command it left running is killed, and only then does the next
+//!   waiter proceed.
 //!
 //! Unix only: the commands are `sh` scripts and the tests send signals.
 #![cfg(unix)]
@@ -336,8 +337,82 @@ fn a_sigkilled_holder_is_reaped_and_the_next_waiter_runs() {
     let snap = snapshot(dir);
     assert!(snap.holders.is_empty() && snap.queue.is_empty(), "{snap:#?}");
 
-    // The killed holder's command was orphaned, not killed; let it finish.
+    // The killed holder's command was killed by the reaper; this only covers
+    // a run where it somehow was not.
     touch(dir, "stop-orphans");
+}
+
+/// Whether any process is left in group `pgid` (or, for a positive id from a
+/// pid file, whether that process lives).
+fn group_alive(pgid: libc::pid_t) -> bool {
+    unsafe { libc::kill(-pgid, 0) == 0 }
+}
+
+fn pid_alive(pid: libc::pid_t) -> bool {
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+fn pid_from(home: &Path, name: &str) -> libc::pid_t {
+    let mut pid = 0;
+    wait_until(&format!("{name} to be written"), Duration::from_secs(20), || {
+        pid = std::fs::read_to_string(home.join(name)).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        pid > 0
+    });
+    pid
+}
+
+/// A wrapper killed outright cannot stop its command. Before the reaper hands
+/// the resource to the next waiter it must kill that command — its whole
+/// process group, grandchildren included — or two commands would run on one
+/// resource. The waiter's script checks, the moment it starts, that nothing of
+/// the old command is left.
+#[test]
+fn a_sigkilled_wrapper_takes_its_command_down_before_the_next_waiter_starts() {
+    let home = short_home();
+    let dir = home.path();
+    // Off a terminal (as under an agent's shell or CI), so the command gets
+    // its own process group.
+    let mut wrapper = run_under(
+        dir,
+        &["a"],
+        &[],
+        "sleep 300 & echo $! > \"$D/grandchild.pid\"; echo $$ > \"$D/child.pid\"; wait",
+    )
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .spawn()
+    .unwrap();
+    let child = pid_from(dir, "child.pid");
+    let grandchild = pid_from(dir, "grandchild.pid");
+    // The wrapper records its command in the table right after spawning it.
+    let state = dir.join(".fleet").join("resources").join("state.json");
+    wait_until("the command to be recorded with its grant", Duration::from_secs(20), || {
+        std::fs::read_to_string(&state).is_ok_and(|t| t.contains(&format!("\"pid\": {child}")))
+    });
+    assert!(group_alive(child), "the command leads its own group");
+
+    let mut waiter = run_under(
+        dir,
+        &["a"],
+        &[],
+        &format!(
+            "if kill -0 {child} 2>/dev/null || kill -0 {grandchild} 2>/dev/null; \
+             then echo SHARED; else echo ALONE; fi > \"$D/waiter-saw\""
+        ),
+    )
+    .spawn()
+    .unwrap();
+    wait_until("the waiter to queue", Duration::from_secs(20), || snapshot(dir).queue.len() == 1);
+
+    wrapper.kill().unwrap(); // SIGKILL: no handler runs, the command is orphaned
+    wrapper.wait().unwrap();
+    assert_eq!(wait_exit(&mut waiter, "the waiter", Duration::from_secs(20)), 0);
+    assert_eq!(lines(dir, "waiter-saw"), vec!["ALONE"], "the old command was still running when the waiter started");
+    assert!(!pid_alive(child) && !pid_alive(grandchild));
+    assert!(!group_alive(child), "nothing of the old group is left");
+    let snap = snapshot(dir);
+    assert!(snap.holders.is_empty() && snap.queue.is_empty(), "{snap:#?}");
 }
 
 /// `--max-wait` never falls back to running without the resource.
@@ -573,6 +648,9 @@ fn a_job_queues_runs_times_out_and_is_reaped() {
     let out = run_under(dir, &["a"], &[], "echo after-the-dead-host").output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
-    // The dead host's command was orphaned, not killed; clean it up.
+    // The reaper killed the dead host's command group before the next
+    // request could run.
+    let left = group_alive(command_group);
     unsafe { libc::kill(-command_group, libc::SIGKILL) };
+    assert!(!left, "the dead host's command outlived its grant");
 }

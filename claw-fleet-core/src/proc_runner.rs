@@ -1128,6 +1128,16 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
     // slave fds close, which masked the leak. Drop `cmd` now to release them.
     drop(cmd);
 
+    // Under its own grant: if this host is killed outright, whoever reaps the
+    // grant kills the command's session group before handing the resources
+    // on. Recorded before `running` is reported, so a running job's command
+    // is always on record.
+    if grant_env(&rec).is_some() {
+        if let Err(e) = crate::resource_queue::record_child(&rec.id, child.id(), true) {
+            eprintln!("fleet-proc-host {id}: could not record the command in the resource queue: {e}");
+        }
+    }
+
     // 4. Report in: from here the host owns the meta file.
     let host_pid = std::process::id();
     rec.status = ProcStatus::Running;

@@ -594,15 +594,24 @@ const CLI_ALLOWED: &[&str] = &[
     "win-interrupt",
 ];
 
-/// Whether the `fleet` CLI may run `subcommand` inside an incognito session.
-pub fn cli_allows(subcommand: &str) -> bool {
-    subcommand.starts_with('-') || CLI_ALLOWED.contains(&subcommand)
+/// Subcommands allowed for one action only. `resource run` queues and runs a
+/// command under a grant — the cargo shim goes through it, so refusing it
+/// would break every `cargo build` in an incognito session — while
+/// `resource ls` would show other sessions' commands and ids.
+const CLI_ALLOWED_ACTIONS: &[(&str, &str)] = &[("resource", "run")];
+
+/// Whether the `fleet` CLI may run `subcommand` (followed by `action`, its
+/// next argument, if any) inside an incognito session.
+pub fn cli_allows(subcommand: &str, action: Option<&str>) -> bool {
+    subcommand.starts_with('-')
+        || CLI_ALLOWED.contains(&subcommand)
+        || action.is_some_and(|a| CLI_ALLOWED_ACTIONS.contains(&(subcommand, a)))
 }
 
 /// The refusal printed by the `fleet` CLI for a subcommand [`cli_allows`] rejects.
 pub fn cli_refusal(subcommand: &str) -> String {
     format!(
-        "fleet {subcommand}: 本会话是隐身会话，不能读取其他会话、历史、记忆或用户身份。可用的 fleet 命令只有 job / watch / spawn。"
+        "fleet {subcommand}: 本会话是隐身会话，不能读取其他会话、历史、记忆或用户身份。可用的 fleet 命令只有 job / watch / spawn / resource run。"
     )
 }
 
@@ -800,7 +809,10 @@ impl Fence {
                 return Some(deny_reason(&root_s));
             }
         }
-        if let Some(sub) = fleet_subcommands(command).into_iter().find(|s| !cli_allows(s)) {
+        if let Some((sub, _)) = fleet_subcommands(command)
+            .into_iter()
+            .find(|(s, a)| !cli_allows(s, a.as_deref()))
+        {
             return Some(cli_refusal(&sub));
         }
         None
@@ -889,7 +901,7 @@ pub fn guard_hook_output(payload: &str) -> Option<String> {
 
 /// The `fleet` subcommands a shell command line invokes, by a rough split on
 /// shell separators. A second line of defence behind the CLI's own check.
-fn fleet_subcommands(command: &str) -> Vec<String> {
+fn fleet_subcommands(command: &str) -> Vec<(String, Option<String>)> {
     let mut out = Vec::new();
     for segment in command.split(|c| matches!(c, ';' | '&' | '|' | '(' | ')' | '`' | '\n')) {
         let mut words = segment.split_whitespace().skip_while(|w| {
@@ -899,8 +911,9 @@ fn fleet_subcommands(command: &str) -> Vec<String> {
         let Some(first) = words.next() else { continue };
         let first = first.trim_matches(|c| c == '"' || c == '\'');
         if first == "fleet" || first.ends_with("/fleet") {
+            let unquote = |w: &str| w.trim_matches(|c| c == '"' || c == '\'').to_string();
             if let Some(sub) = words.next() {
-                out.push(sub.trim_matches(|c| c == '"' || c == '\'').to_string());
+                out.push((unquote(sub), words.next().map(unquote)));
             }
         }
     }
@@ -1197,11 +1210,26 @@ mod tests {
     #[test]
     fn the_cli_refuses_history_subcommands() {
         for s in ["job", "watch", "spawn", "guard", "notes-hint", "prd-context", "session", "--version"] {
-            assert!(cli_allows(s), "{s}");
+            assert!(cli_allows(s, None), "{s}");
         }
         for s in ["plan", "history", "notes", "wiki", "agents", "agent", "search", "memory", "account", "handoff", "report"] {
-            assert!(!cli_allows(s), "{s}");
+            assert!(!cli_allows(s, None), "{s}");
         }
+    }
+
+    /// The cargo shim runs `fleet resource run`; the rest of `fleet resource`
+    /// lists other sessions' commands and stays refused.
+    #[test]
+    fn the_cli_allows_resource_run_only() {
+        assert!(cli_allows("resource", Some("run")));
+        for action in [None, Some("ls"), Some("set"), Some("move"), Some("cancel")] {
+            assert!(!cli_allows("resource", action), "{action:?}");
+        }
+        assert!(!cli_allows("plan", Some("run")), "an action never widens another subcommand");
+        let (fence, _home) = fence();
+        assert_eq!(fence.check_command("fleet resource run --need db -- make test"), None);
+        assert!(fence.check_command("fleet resource ls").is_some());
+        assert!(fence.check_command("make && fleet resource").is_some());
     }
 
     #[test]

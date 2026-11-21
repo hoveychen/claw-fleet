@@ -240,7 +240,7 @@ fn task_tool_def() -> Value {
 fn job_tool_def() -> Value {
     json!({
         "name": "fleet__job",
-        "description": "Run a long shell command (a full test suite, a build, a render — anything that may take more than a few minutes) as a Fleet-hosted JOB, then wait on it by id. Use this instead of a foreground Bash that may hit its 600s cap, a background Bash / Monitor (killed when your turn ends — for a subagent, when it returns), or `nohup … &` + `ps | grep` + tail-the-log polling. A job runs detached under Fleet, survives your turn, your subagent and your session, and keeps a real exit code and a log. Typical use: `run`, keep working, then `wait` (blocks up to 540s per call; call it again while it reports running) — a subagent must not return while its job is still running. A top-level session that would rather end its turn can pass `wake: true` on run to be resumed when the job finishes. Actions: run (--command required; --cwd/--wake/--note optional — give a note whenever you pass wake), wait (--id required; --timeout seconds, default and max 540), status (--id required), stop (--id required), list (this workspace's jobs). wait/status show the last `tail` lines of output (default 20).",
+        "description": "Run a long shell command (a full test suite, a build, a render — anything that may take more than a few minutes) as a Fleet-hosted JOB, then wait on it by id. Use this instead of a foreground Bash that may hit its 600s cap, a background Bash / Monitor (killed when your turn ends — for a subagent, when it returns), or `nohup … &` + `ps | grep` + tail-the-log polling. A job runs detached under Fleet, survives your turn, your subagent and your session, and keeps a real exit code and a log. Typical use: `run`, keep working, then `wait` (blocks up to 540s per call; call it again while it reports running) — a subagent must not return while its job is still running. A top-level session that would rather end its turn can pass `wake: true` on run to be resumed when the job finishes. If the command needs something exclusive (a test database, a port, a device, an e2e environment, a GPU), declare ALL of it in one `need` list on run: the job queues machine-wide, starts only once every resource is granted at the same time, and releases them when it exits — never hand-roll lock files or ask other sessions by message whether they are using it. A job started inside another job may only `need` what the outer one already holds; anything more is refused. Actions: run (--command required; --cwd/--wake/--note/--need/--priority/--max_wait optional — give a note whenever you pass wake), wait (--id required; --timeout seconds, default and max 540), status (--id required), stop (--id required), list (this workspace's jobs). wait/status show the last `tail` lines of output (default 20).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -249,6 +249,9 @@ fn job_tool_def() -> Value {
                 "cwd": {"type": "string", "description": "Directory to run in (run only) — e.g. your plan's `.worktrees/<id>` checkout. Defaults to the session's workspace."},
                 "wake": {"type": "boolean", "description": "Resume THIS session with the job's result when it finishes, so you can end your turn now (run only; top-level sessions only — a subagent waits instead)."},
                 "note": {"type": "string", "description": "With wake: one short sentence, in the boss's language, of what the job is doing (e.g. \"整局 bot 长跑抓贴纸错位现场\"). It is what the boss sees on the task's waiting condition instead of the raw command — always pass it with wake."},
+                "need": {"type": "array", "items": {"type": "string"}, "description": "Resources the command must hold exclusively while it runs (run only), each `name` or `name:units` — e.g. [\"test-db\", \"gpu:2\"]. Machine-global names; prefix project-specific ones (`myproj/e2e`). A resource named for the first time is created with capacity 1. Granted all at once or not at all; status is `queued` until then."},
+                "priority": {"type": "string", "enum": ["high", "normal", "low"], "description": "Queue priority for a job with `need` (run only); default normal."},
+                "max_wait": {"type": "string", "description": "Give up if the resources are not granted within this long (run only, with `need`): `30m`, `90s`, or seconds. The job then ends with exit 75 and the command never runs. Default: wait indefinitely."},
                 "id": {"type": "string", "description": "Job id. Required for wait/status/stop."},
                 "timeout": {"type": "integer", "description": "Seconds to block (wait only), max 540."},
                 "tail": {"type": "integer", "description": "Output lines to show (wait/status), default 20, max 200."}
@@ -735,11 +738,7 @@ fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, Str
                 return Ok(crate::ask_preempt::job_wait_stepped_aside_notice(&id));
             }
             let mut out = job::render(&rec, tail);
-            if !job::is_done(&rec) {
-                out.push_str(&format!(
-                    "still running — call action=wait id={id} again.\n"
-                ));
-            }
+            out.push_str(&job_wait_footer(&rec));
             Ok(deliver_job(out, &rec, tail))
         }
         "status" => {
@@ -770,6 +769,23 @@ fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, Str
                 .join("\n"))
         }
         other => Err(format!("unknown job action: {other}")),
+    }
+}
+
+/// The last line of a `wait` that returned before the job exited. A queued job
+/// is told apart from a running one: its command has not started, and the
+/// report above already names what it waits on (`job::render`'s queue line).
+fn job_wait_footer(rec: &crate::proc_runner::ProcRecord) -> String {
+    use crate::proc_runner::ProcStatus;
+    let id = &rec.id;
+    match rec.status {
+        ProcStatus::Exited => String::new(),
+        ProcStatus::Queued => format!(
+            "still queued for its resources — the command has not started yet. Call action=wait \
+             id={id} again; it starts on its own once every resource is granted (`fleet resource ls` \
+             shows the whole queue).\n"
+        ),
+        _ => format!("still running — call action=wait id={id} again.\n"),
     }
 }
 
@@ -2063,6 +2079,48 @@ mod tests {
         assert!(none.starts_with("No artifact"), "{none}");
         drop(guard);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn job_schema_declares_the_resource_args_job_run_options_reads() {
+        let def = job_tool_def();
+        let props = &def["inputSchema"]["properties"];
+        assert_eq!(props["need"]["type"], "array");
+        assert_eq!(props["priority"]["enum"], json!(["high", "normal", "low"]));
+        assert_eq!(props["max_wait"]["type"], "string");
+        let desc = def["description"].as_str().unwrap();
+        assert!(desc.contains("ALL of it in one `need` list"), "{desc}");
+
+        let opts = job_run_options(&json!({"need": ["test-db", "gpu:2"], "priority": "high", "max_wait": "30m"})).unwrap();
+        assert_eq!(crate::resource_queue::format_needs(&opts.needs), "gpu:2, test-db");
+        assert_eq!(opts.max_wait, Some(std::time::Duration::from_secs(1800)));
+    }
+
+    #[test]
+    fn job_wait_footer_tells_queued_from_running() {
+        use crate::proc_runner::{ProcRecord, ProcStatus};
+        let mut rec = ProcRecord {
+            id: "pq1".into(),
+            workspace_path: "/ws".into(),
+            command: "make test".into(),
+            status: ProcStatus::Queued,
+            child_pid: None,
+            host_pid: None,
+            host_start_time: None,
+            exit_code: None,
+            started_ms: 0,
+            finished_ms: None,
+            cols: 80,
+            rows: 24,
+            queue: None,
+        };
+        let queued = job_wait_footer(&rec);
+        assert!(queued.starts_with("still queued for its resources"), "{queued}");
+        assert!(queued.contains("id=pq1"), "{queued}");
+        rec.status = ProcStatus::Running;
+        assert!(job_wait_footer(&rec).starts_with("still running"));
+        rec.status = ProcStatus::Exited;
+        assert_eq!(job_wait_footer(&rec), "");
     }
 
     #[test]

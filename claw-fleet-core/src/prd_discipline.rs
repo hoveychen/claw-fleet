@@ -230,6 +230,7 @@ fleet handoff --note "<本链交接文档：与老板对齐的结论、踩过的
 
 - **能前台跑的命令**（编译、测试、脚本）→ 直接前台跑，把 Bash 的 `timeout` 调大（上限 600000 毫秒），一次调用等到底。
 - **可能超过 10 分钟的长命令**（全量回归、大构建、渲染）→ `fleet__job` 的 `run` 交给 Fleet 托管，再反复 `wait`（每次最多阻塞 540 秒）直到跑完；顶层会话想先收工就在 `run` 时带 `wake: true`，跑完会唤醒你；同时用 `note` 写一句这个 job 在干什么，老板在任务的等待条件里看到的就是它，不写就只剩一截命令。它不随回合或子代理结束被杀，有真实退出码。**子代理尤其如此**：任务没跑完不许返回。别用 `nohup … &`，也别用 `ps | grep <名字>` 等进程——那会匹配到你自己 `claude -p` 的命令行，对着一个早已死掉的进程空等。
+- **要独占的东西**（测试库、端口、设备、e2e 环境、GPU）→ `fleet__job` 的 `run` 带 `need: ["test-db", "gpu:1"]`，**一次声明全部资源**：Fleet 本机全局排队，全部拿到才开跑，命令结束或持有者死掉就释放，`fleet resource ls` 能看到谁占着、谁在等。**别自己造锁文件，也别发消息问别的会话在不在用**——那正是互相以为对方占着而死锁的来路。job 里再申请外层没声明的资源会被直接拒绝。
 - **已经在跑的条件** → `Monitor` 的 until 轮询（回合内阻塞，轮询本身不花 round trip）。
 - **跨回合的事**（CI、构建产物、部署上线）→ `fleet watch`，然后干净地结束回合。
 - **真的无事可等** → 直接结束回合。
@@ -476,6 +477,7 @@ Always pass `--title <a few words>` when creating a `fleet loop` or `fleet sched
 
 - **A command you can run in the foreground** (a compile, a test, a script) → just run it, raising Bash's `timeout` (up to 600000 ms), and wait it out in one call.
 - **A long command that may exceed 10 minutes** (a full regression, a big build, a render) → hand it to Fleet with `fleet__job` `run`, then call `wait` (blocks up to 540s each) until it finishes; a top-level session that would rather end its turn passes `wake: true` on `run` and is resumed when it ends — together with a one-sentence `note` of what the job is doing, which is what the boss sees as the task's waiting condition (without it they see a truncated command line). A job survives your turn and your subagent and keeps a real exit code. **Subagents especially**: do not return while your job is running. Never `nohup … &`, and never wait on a process via `ps | grep <name>` — it matches your own `claude -p` command line and waits forever on a process that is long gone.
+- **Something that needs exclusive use** (a test database, a port, a device, an e2e environment, a GPU) → `fleet__job` `run` with `need: ["test-db", "gpu:1"]`, **declaring every resource in that one call**: Fleet queues it machine-wide, starts it only once all of them are granted, releases them when the command ends or its holder dies, and `fleet resource ls` shows who holds and who waits. **Never hand-roll lock files or message other sessions to ask whether they are using it** — that is exactly how sessions deadlock, each believing the other holds it. A job that asks for a resource its enclosing job did not declare is refused.
 - **A condition already running** → `Monitor`'s until-polling, which blocks *inside* the turn and costs no extra round trip.
 - **Something that spans turns** (CI, build artifacts, a deploy) → `fleet watch`, then end the turn cleanly.
 - **Nothing to wait for** → just end the turn.
@@ -653,6 +655,23 @@ mod tests {
             ("en", "Established facts carry over verbatim too"),
         ] {
             assert!(render_guidance("Boss", locale).contains(needle), "[{locale}] missing {needle:?}");
+        }
+    }
+
+    /// Sub-tasks deadlocked on ad-hoc lock files and "are you using it?"
+    /// messages, each believing another held the resource (boss, 2026-11-21).
+    /// The guidance must route exclusive use through `fleet__job` `need`,
+    /// declared all at once, and ban the hand-rolled alternatives.
+    #[test]
+    fn exclusive_resources_go_through_job_need_in_both_locales() {
+        for (locale, all_at_once, no_ad_hoc) in [
+            ("zh", "一次声明全部资源", "别自己造锁文件"),
+            ("en", "declaring every resource in that one call", "Never hand-roll lock files"),
+        ] {
+            let g = render_guidance("Boss", locale);
+            assert!(g.contains("`need: [\"test-db\", \"gpu:1\"]`"), "[{locale}] must show the need arg");
+            assert!(g.contains(all_at_once), "[{locale}] must demand one declaration");
+            assert!(g.contains(no_ad_hoc), "[{locale}] must ban hand-rolled locks");
         }
     }
 
