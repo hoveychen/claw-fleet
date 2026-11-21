@@ -110,13 +110,16 @@ export function ResourcesView() {
   // One drag hook for the page; the row that was pressed is remembered here.
   const pressed = useRef<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
-  const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; after: boolean; card: string | null } | null>(null);
   const dropFrom = (over: Element | null, y: number) => {
     const id = dropTargetAt(over, "data-rq-waiter");
     if (!id) return null;
     const row = over?.closest("[data-rq-waiter]");
     const rect = row?.getBoundingClientRect();
-    return { id, after: rect ? y > rect.top + rect.height / 2 : false };
+    // A multi-resource request has a row on each of its cards; the line goes
+    // only on the card under the pointer.
+    const card = dropTargetAt(over, "data-rq-card");
+    return { id, after: rect ? y > rect.top + rect.height / 2 : false, card };
   };
   const drag = usePointerDrag({
     onStart: () => {
@@ -248,7 +251,7 @@ interface CardProps {
   queued: Map<string, QueuedRequest>;
   busy: string | null;
   dragging: string | null;
-  dropAt: { id: string; after: boolean } | null;
+  dropAt: { id: string; after: boolean; card: string | null } | null;
   onPressWaiter: (id: string, e: React.PointerEvent) => void;
   didDrag: () => boolean;
   onCapacity: (capacity: number) => void;
@@ -379,7 +382,7 @@ function ResourceCard({
             const q = queued.get(id);
             if (!q) return null;
             const r = q.request;
-            const indicator = dropAt?.id === id && dragging && dragging !== id ? (dropAt.after ? "after" : "before") : undefined;
+            const indicator = dropAt?.id === id && dropAt.card === res.name && dragging && dragging !== id ? (dropAt.after ? "after" : "before") : undefined;
             return (
               <li
                 key={id}
