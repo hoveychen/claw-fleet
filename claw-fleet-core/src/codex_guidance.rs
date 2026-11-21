@@ -345,6 +345,15 @@ followed, failures reported at once): `fleet watch create --sessions \
 <id1>,<id2> [--mode all|any]` instead of `--until`; `fleet watch add/remove \
 <watch-id> <ids…>` changes the set. Never poll another session's transcript \
 from a shell loop — the boss's follow-ups cannot reach you meanwhile.\n\
+- **Something needing exclusive use** (a test DB, a port, a device, an e2e \
+env, a GPU) → `fleet__job` `run` with `need: [\"test-db\", \"gpu:1\"]` (CLI: \
+`fleet job run --need test-db --need gpu:1 -- <cmd>`, foreground: `fleet \
+resource run --need …`), **declaring every resource in that one call**: Fleet \
+queues it machine-wide, starts it once all are granted, and releases them when \
+the command ends or its holder dies; `fleet resource ls` shows who holds and \
+who waits. **Never hand-roll lock files or message other sessions to ask \
+whether they use it** — that is how sessions deadlock, each believing the \
+other holds it. A nested request for an undeclared resource is refused.\n\
 - Pick the scheduling relay by *need*, not by the name: **repeat periodically \
 (cron) → `fleet loop`** (CLI alias `fleet cron`; Fleet-managed, durable, spawns \
 a fresh LOCAL session each interval so local creds are present — don't mistake \
@@ -1066,6 +1075,21 @@ fn strip_block(content: &str, begin: &str, end: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prd_block_routes_exclusive_use_through_the_resource_queue() {
+        for locale in ["zh", "en"] {
+            let g = render_codex_prd_block("Boss", locale);
+            for needle in [
+                "need: [",
+                "declaring every resource",
+                "Never hand-roll lock files",
+                "fleet resource ls",
+            ] {
+                assert!(g.contains(needle), "[{locale}] missing {needle:?}");
+            }
+        }
+    }
 
     #[test]
     fn prd_block_teaches_wallclock_preflight() {
