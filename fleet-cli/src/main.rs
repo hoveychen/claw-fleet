@@ -1117,6 +1117,16 @@ pub(crate) enum ResourceCommands {
         #[arg(long)]
         capacity: u32,
     },
+    /// Evict a holder: stop the command running under this grant (SIGTERM,
+    /// then SIGKILL) and hand its resources to the next request.
+    Kick {
+        /// Id of a holding request (a job id, or an `r…` id from `fleet
+        /// resource ls`).
+        id: String,
+    },
+    /// Delete a resource nothing holds or waits for — e.g. one a typo in
+    /// `--need` created.
+    Rm { name: String },
 }
 
 #[derive(Subcommand)]

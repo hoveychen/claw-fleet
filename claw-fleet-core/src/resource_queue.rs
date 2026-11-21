@@ -587,6 +587,26 @@ impl State {
         Ok(())
     }
 
+    fn remove_resource(&mut self, name: &str) -> Result<(), String> {
+        let using: Vec<&str> = self
+            .grants
+            .iter()
+            .chain(&self.queue)
+            .filter(|r| r.needs.contains_key(name))
+            .map(|r| r.id.as_str())
+            .collect();
+        if !using.is_empty() {
+            return Err(format!(
+                "{name} is in use by {} — only an idle resource can be removed",
+                using.join(", ")
+            ));
+        }
+        if self.resources.remove(name).is_none() {
+            return Err(format!("no resource {name}"));
+        }
+        Ok(())
+    }
+
     /// The table as the clients show it. Call after [`State::schedule`], so the
     /// queue holds only requests that really are waiting.
     fn snapshot(&self, now_ms: u64) -> ResourceSnapshot {
@@ -824,6 +844,156 @@ fn set_capacity_at(path: &Path, name: &str, capacity: u32) -> Result<ResourceSna
         s.schedule(&holder_alive, now);
         Ok(s.snapshot(now))
     })?
+}
+
+/// Delete a resource from the table — for one created by a typo in `--need`.
+/// Refused while anything holds it or waits for it: the next request naming
+/// it would only re-create it, and a holder's grant must stay explainable.
+pub fn remove_resource(name: &str) -> Result<ResourceSnapshot, String> {
+    remove_resource_at(&state_path()?, name)
+}
+
+fn remove_resource_at(path: &Path, name: &str) -> Result<ResourceSnapshot, String> {
+    let now = now_ms();
+    transact(path, |s| {
+        s.schedule(&holder_alive, now);
+        s.remove_resource(name)?;
+        Ok(s.snapshot(now))
+    })?
+}
+
+/// How long [`kick`] gives a holder to let go after each signal: SIGTERM, then
+/// SIGKILL.
+pub const KICK_GRACE: Duration = Duration::from_secs(3);
+
+/// Evict a holder: stop whatever runs under grant `id` and take its resources
+/// back. Blocks until the grant is gone (at most twice [`KICK_GRACE`]), so the
+/// returned table already shows the next request granted.
+///
+/// * a **job** is stopped the way `fleet job stop` does it — its command's
+///   process group gets SIGTERM, then SIGKILL — and its host releases the
+///   grant when the command exits;
+/// * a **foreground** `fleet resource run` gets SIGTERM, which it forwards to
+///   its command before releasing; if it is still holding after the grace,
+///   its children and then it get SIGKILL and the dead holder is reaped.
+///
+/// The resources are never handed on while the evicted command may still be
+/// running: the grant goes only when its holder lets go or is dead. Every
+/// signal is preceded by the `(pid, start time)` check, so a recycled pid is
+/// never signalled. A queued request is refused — that is [`cancel_request`].
+pub fn kick(id: &str) -> Result<ResourceSnapshot, String> {
+    kick_at(&state_path()?, id, KICK_GRACE)
+}
+
+fn kick_at(path: &Path, id: &str, grace: Duration) -> Result<ResourceSnapshot, String> {
+    let now = now_ms();
+    let held = transact(path, |s| {
+        s.schedule(&holder_alive, now);
+        if let Some(g) = s.grants.iter().find(|g| g.id == id) {
+            return Ok(g.clone());
+        }
+        if s.queue.iter().any(|r| r.id == id) {
+            return Err(format!(
+                "{id} is still queued and holds nothing — cancel it instead"
+            ));
+        }
+        Err(format!("no request {id} holds a resource"))
+    })??;
+
+    for force in [false, true] {
+        evict::signal(&held, force);
+        if wait_released(path, id, grace)? {
+            return snapshot_at(path);
+        }
+    }
+    Err(format!(
+        "{id} still holds its resources {} after SIGKILL (pid {})",
+        fmt_duration(2 * grace.as_millis() as u64),
+        held.holder.pid
+    ))
+}
+
+/// Poll until `id` no longer holds anything, running the pass each time so a
+/// dead holder is reaped. Returns whether it let go within `limit`.
+fn wait_released(path: &Path, id: &str, limit: Duration) -> Result<bool, String> {
+    let deadline = Instant::now() + limit;
+    loop {
+        let now = now_ms();
+        let holding = transact(path, |s| {
+            s.schedule(&holder_alive, now);
+            s.grants.iter().any(|g| g.id == id)
+        })?;
+        if !holding {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// The signals behind [`kick`].
+mod evict {
+    use super::{Holder, RequestKind, ResourceRequest};
+
+    pub(super) fn signal(req: &ResourceRequest, force: bool) {
+        // A job's command runs in its own process group, which `kill_proc`
+        // targets. Fall back to the host process if the job record is gone.
+        if req.kind == RequestKind::Job
+            && crate::proc_runner::kill_proc(&req.id, force).is_ok()
+        {
+            return;
+        }
+        if !req.holder.is_alive() {
+            return;
+        }
+        signal_holder(&req.holder, force);
+    }
+
+    #[cfg(unix)]
+    fn signal_holder(holder: &Holder, force: bool) {
+        let pid = holder.pid as libc::pid_t;
+        if force {
+            // `fleet resource run` waits for its command and only then
+            // releases; SIGKILLing it alone would orphan the command while
+            // the grant is reaped. Kill the command first.
+            for child in children_of(holder.pid) {
+                unsafe { libc::kill(child as libc::pid_t, libc::SIGKILL) };
+            }
+            // Re-check: the holder may have exited, and its pid been reused,
+            // while the children were being killed.
+            if holder.is_alive() {
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+        } else {
+            unsafe { libc::kill(pid, libc::SIGTERM) };
+        }
+    }
+
+    #[cfg(unix)]
+    pub(super) fn children_of(pid: u32) -> Vec<u32> {
+        crate::process_util::command("pgrep")
+            .args(["-P", &pid.to_string()])
+            .output()
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .filter_map(|l| l.trim().parse().ok())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// No graceful tier on Windows: `taskkill /T` takes the holder and its
+    /// command tree down together, and only `/F` reliably ends a console
+    /// process, so both rounds force it.
+    #[cfg(not(unix))]
+    fn signal_holder(holder: &Holder, _force: bool) {
+        let _ = crate::process_util::command("taskkill")
+            .args(["/F", "/T", "/PID", &holder.pid.to_string()])
+            .status();
+    }
 }
 
 /// Whether a request for `needs` could ever be granted, without queueing it.
@@ -1858,5 +2028,95 @@ mod tests {
         assert!(text.contains("a (held by holder)"), "{text}");
         assert!(text.contains("b (reserved for head"), "{text}");
         assert!(render_snapshot(&State::default().snapshot(0)).contains("no resources yet"));
+    }
+
+    #[test]
+    fn only_an_idle_resource_can_be_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        set_capacity_at(&path, "typo-db", 1).unwrap();
+        let mut r = req("user", &["db"]);
+        r.holder = Holder::current();
+        transact(&path, |s| s.enqueue(r)).unwrap().unwrap();
+        let mut w = req("waiter", &["db"]);
+        w.holder = Holder::current();
+        transact(&path, |s| s.enqueue(w)).unwrap().unwrap();
+
+        let err = remove_resource_at(&path, "db").unwrap_err();
+        assert!(err.contains("user") && err.contains("waiter"), "{err}");
+        assert!(remove_resource_at(&path, "nope").unwrap_err().contains("no resource nope"));
+
+        let snap = remove_resource_at(&path, "typo-db").unwrap();
+        let names: Vec<&str> = snap.resources.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, vec!["db"]);
+    }
+
+    /// Start `sh -c <script>` and reap it on a thread, so the moment it dies
+    /// its pid stops looking alive (an unreaped zombie still answers kill 0).
+    #[cfg(unix)]
+    fn spawn_holder(script: &str) -> (Holder, std::thread::JoinHandle<()>) {
+        let mut child = std::process::Command::new("sh").args(["-c", script]).spawn().unwrap();
+        let pid = child.id();
+        // Give the shell a moment to install its traps before anyone signals.
+        std::thread::sleep(Duration::from_millis(150));
+        let holder = Holder { pid, start_time: crate::session::process_start_time(pid) };
+        let reaper = std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        (holder, reaper)
+    }
+
+    #[cfg(unix)]
+    fn grant_to(path: &Path, id: &str, want: &[&str], holder: Holder) {
+        let mut r = req(id, want);
+        r.kind = RequestKind::Foreground;
+        r.holder = holder;
+        transact(path, |s| {
+            s.enqueue(r).unwrap();
+            s.schedule(&holder_alive, 1);
+        })
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kick_terminates_a_holder_and_grants_the_next_waiter() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let (holder, reaper) = spawn_holder("sleep 30");
+        grant_to(&path, "victim", &["db"], holder);
+        let mut next = req("next", &["db"]);
+        next.holder = Holder::current();
+        transact(&path, |s| s.enqueue(next)).unwrap().unwrap();
+        assert!(kick_at(&path, "next", Duration::from_secs(2)).unwrap_err().contains("cancel it instead"));
+        assert!(kick_at(&path, "ghost", Duration::from_secs(2)).unwrap_err().contains("no request ghost"));
+
+        let started = Instant::now();
+        let snap = kick_at(&path, "victim", Duration::from_secs(5)).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(5), "SIGTERM was enough: {:?}", started.elapsed());
+        assert_eq!(ids(&snap.holders), vec!["next"], "the waiter is granted in the same call");
+        reaper.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kick_escalates_to_sigkill_for_a_holder_that_ignores_sigterm() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let (holder, reaper) = spawn_holder("trap '' TERM; sleep 30; sleep 30");
+        let pid = holder.pid;
+        grant_to(&path, "stubborn", &["db"], holder);
+        let commands = evict::children_of(pid);
+        assert!(!commands.is_empty(), "the shell runs sleep as a child");
+
+        let snap = kick_at(&path, "stubborn", Duration::from_millis(300)).unwrap();
+        assert!(snap.holders.is_empty());
+        reaper.join().unwrap();
+        // Its command went down with it rather than being orphaned (an orphan
+        // is reparented and reaped by init, so a dead one stops answering).
+        std::thread::sleep(Duration::from_millis(200));
+        for c in commands {
+            assert_ne!(unsafe { libc::kill(c as libc::pid_t, 0) }, 0, "command {c} outlived the kick");
+        }
     }
 }
