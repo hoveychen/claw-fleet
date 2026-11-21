@@ -2741,6 +2741,13 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "proc_resize" => serve_proc_resize(params),
         "proc_kill" => serve_proc_kill(params),
         "proc_clear" => serve_proc_clear(params),
+        // ── Resource queue (resource_queue) ──────────────────────────────────
+        // View + reorder + cancel. Writes re-run on every agent in the channel,
+        // which is harmless: a move to the same place is a no-op and a second
+        // cancel of the same id fails with "not queued" instead of panicking.
+        "resource_list" => serve_resource_list(params),
+        "resource_move" => serve_resource_move(params),
+        "resource_cancel" => serve_resource_cancel(params),
         // ── HTTP tunnel ─────────────────────────────────────────────────────
         // The desktop web bundle's fetches, replayed against this host's own
         // `fleet serve` routes behind a whitelist — see relay_http.
@@ -4359,6 +4366,39 @@ fn serve_proc_kill(params: &Value) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
+/// The machine's resource table — every resource, its holders and the queue.
+fn serve_resource_list(_params: &Value) -> Result<Value, String> {
+    let snap = crate::resource_queue::snapshot()?;
+    serde_json::to_value(snap).map_err(|e| e.to_string())
+}
+
+/// `{ id, target: { index: n } | { before: id } }` → the table afterwards.
+fn serve_resource_move(params: &Value) -> Result<Value, String> {
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or("missing id")?;
+    let target: crate::resource_queue::MoveTarget = serde_json::from_value(
+        params.get("target").cloned().ok_or("missing target")?,
+    )
+    .map_err(|e| format!("bad resource_move target: {e}"))?;
+    let snap = crate::resource_queue::move_request(id, &target)?;
+    serde_json::to_value(snap).map_err(|e| e.to_string())
+}
+
+/// `{ id }` → the table afterwards. Only a queued request can be cancelled;
+/// a running one is refused by core.
+fn serve_resource_cancel(params: &Value) -> Result<Value, String> {
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or("missing id")?;
+    let snap = crate::resource_queue::cancel_request(id)?;
+    serde_json::to_value(snap).map_err(|e| e.to_string())
+}
+
 /// Every proc this host knows about (newest first — `list_procs` already
 /// orders them) — how a reopened terminal panel finds the sessions it left
 /// running. The pty host is detached, so closing the tab, or the whole
@@ -5475,6 +5515,37 @@ mod tests {
         f();
         drop(guard);
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resource_methods_list_and_refuse_vanished_ids() {
+        with_temp_home(|| {
+            crate::resource_queue::set_capacity("gpu", 2).unwrap();
+            let snap = serve_request("resource_list", &json!({})).unwrap();
+            assert_eq!(snap["resources"][0]["name"], "gpu");
+            assert_eq!(snap["resources"][0]["capacity"], 2);
+            assert_eq!(snap["queue"], json!([]));
+
+            // A request that already ran or was cancelled by another agent in
+            // the channel: an error the phone can show, never a panic.
+            let err = serve_request("resource_cancel", &json!({ "id": "gone" })).unwrap_err();
+            assert!(err.contains("gone"), "{err}");
+            let err = serve_request(
+                "resource_move",
+                &json!({ "id": "gone", "target": { "index": 1 } }),
+            )
+            .unwrap_err();
+            assert!(err.contains("gone"), "{err}");
+
+            assert!(serve_request("resource_cancel", &json!({})).is_err());
+            assert!(serve_request("resource_move", &json!({ "id": "x" })).is_err());
+            let err = serve_request(
+                "resource_move",
+                &json!({ "id": "x", "target": { "sideways": 1 } }),
+            )
+            .unwrap_err();
+            assert!(err.contains("bad resource_move target"), "{err}");
+        });
     }
 
     /// Park a fleet__ask card for a session whose transcript says Fleet launched
