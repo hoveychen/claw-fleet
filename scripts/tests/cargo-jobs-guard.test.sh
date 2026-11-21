@@ -6,7 +6,10 @@
 # decisions (gate / passthrough / queue / reap) rather than about rustc.
 #
 # Each test points FLEET_CARGO_SLOT_ROOT at a scratch directory so it never
-# touches — or waits on — the machine's real compile slots.
+# touches — or waits on — the machine's real compile slots. The mkdir-slot
+# tests pin FLEET_CARGO_FLEET_BIN=none; the resource-queue tests at the end
+# use a real fleet-cli (FLEET_TEST_BIN, else target/debug/fleet-cli) with a
+# scratch FLEET_HOME, and are skipped — loudly — when none is built.
 #
 # Usage: scripts/tests/cargo-jobs-guard.test.sh
 
@@ -33,6 +36,7 @@ setup() {
   echo "argv: $*"
   echo "held: ${CARGO_JOBS_GUARD_HELD:-<unset>}"
   echo "jobs: ${CARGO_BUILD_JOBS:-<unset>}"
+  echo "grant: ${FLEET_RESOURCE_GRANT:-<unset>}"
 } >> "$FAKE_LOG"
 [[ -n "${FAKE_SLEEP:-}" ]] && sleep "$FAKE_SLEEP"
 exit "${FAKE_EXIT:-0}"
@@ -41,11 +45,12 @@ FAKE
   export FAKE_LOG
   SLOT_ROOT="$SANDBOX/tmp/slots"
   export FLEET_CARGO_SLOT_ROOT="$SLOT_ROOT"
+  export FLEET_CARGO_FLEET_BIN=none
 }
 
 teardown() {
   rm -rf "$SANDBOX"
-  unset FAKE_SLEEP FAKE_EXIT FLEET_CARGO_SLOT_ROOT
+  unset FAKE_SLEEP FAKE_EXIT FLEET_CARGO_SLOT_ROOT FLEET_CARGO_FLEET_BIN FLEET_HOME
 }
 
 run_guard() {
@@ -252,6 +257,136 @@ else
   bad "FLEET_CARGO_GUARD=0 disables the gate entirely" "$(cat "$FAKE_LOG")"
 fi
 teardown
+
+# ── Resource-queue gate (a fleet with `resource run` is available) ───────────
+
+FLEET_TEST_BIN="${FLEET_TEST_BIN:-$SCRIPT_DIR/../../target/debug/fleet-cli}"
+
+# The mkdir-slot setup, plus a real fleet on a scratch FLEET_HOME. A short
+# path: a job host would bind a unix socket under it.
+setup_fleet() {
+  setup
+  export FLEET_CARGO_FLEET_BIN="$FLEET_TEST_BIN"
+  FLEET_HOME="$(mktemp -d /tmp/fcg.XXXXXX)"
+  export FLEET_HOME
+  unset FLEET_RESOURCE_GRANT FLEET_INCOGNITO
+}
+
+teardown_fleet() {
+  local home="$FLEET_HOME"
+  teardown
+  rm -rf "$home"
+}
+
+state_file() { printf '%s\n' "$FLEET_HOME/.fleet/resources/state.json"; }
+
+if [[ ! -x "$FLEET_TEST_BIN" ]] || ! "$FLEET_TEST_BIN" resource run --help 2>/dev/null | grep -q -- '--need'; then
+  printf '  SKIP resource-queue tests: no fleet-cli with `resource run` at %s (build it or set FLEET_TEST_BIN)\n' "$FLEET_TEST_BIN"
+else
+
+setup_fleet
+FLEET_CARGO_SLOTS=3 run_guard build >/dev/null 2>&1
+if grep -q 'argv: build' "$FAKE_LOG" && grep -q 'held: 1' "$FAKE_LOG" && grep -q '^grant: r' "$FAKE_LOG" \
+  && [[ ! -d "$SLOT_ROOT/slot-1" ]] && grep -A1 '"cargo": {' "$(state_file)" | grep -q '"capacity": 3'; then
+  ok "a heavy cargo runs under a grant of resource cargo, capacity from FLEET_CARGO_SLOTS"
+else
+  bad "a heavy cargo runs under a grant of resource cargo" "$(cat "$FAKE_LOG"; cat "$(state_file)" 2>&1)"
+fi
+teardown_fleet
+
+setup_fleet
+run_guard fmt >/dev/null 2>&1
+if grep -q 'grant: <unset>' "$FAKE_LOG" && [[ ! -e "$(state_file)" ]]; then
+  ok "cheap subcommands still pass through without touching the queue"
+else
+  bad "cheap subcommands still pass through without touching the queue" "$(cat "$FAKE_LOG")"
+fi
+teardown_fleet
+
+setup_fleet
+FAKE_EXIT=75 run_guard run >/dev/null 2>&1
+status=$?
+if (( status == 75 )) && [[ "$(grep -c 'argv: run' "$FAKE_LOG")" == 1 ]]; then
+  ok "cargo's own exit code — even 75 — propagates, and cargo is not run twice"
+else
+  bad "cargo's own exit code — even 75 — propagates" "status=$status log=$(cat "$FAKE_LOG")"
+fi
+teardown_fleet
+
+setup_fleet
+FLEET_CARGO_SLOTS=1 FAKE_SLEEP=4 run_guard build >/dev/null 2>&1 &
+holder=$!
+for _ in $(seq 1 50); do
+  grep -q 'argv: build' "$FAKE_LOG" 2>/dev/null && break
+  sleep 0.1
+done
+start=$(date +%s)
+FLEET_CARGO_SLOTS=1 run_guard test >/dev/null 2>&1
+elapsed=$(( $(date +%s) - start ))
+wait "$holder" 2>/dev/null
+order="$(grep '^argv: ' "$FAKE_LOG" | tr '\n' ' ')"
+if (( elapsed >= 2 )) && [[ "$order" == "argv: build argv: test " ]] && [[ "$(grep -c '^grant: r' "$FAKE_LOG")" == 2 ]]; then
+  ok "a second heavy cargo queues behind the only unit of cargo (waited ${elapsed}s)"
+else
+  bad "a second heavy cargo queues behind the only unit of cargo" "elapsed=${elapsed}s order=$order log=$(cat "$FAKE_LOG")"
+fi
+teardown_fleet
+
+# Never deadlock the build: a queue timeout proceeds ungated, like the old wait.
+setup_fleet
+FLEET_CARGO_SLOTS=1 FAKE_SLEEP=20 run_guard build >/dev/null 2>&1 &
+holder=$!
+for _ in $(seq 1 50); do
+  grep -q 'argv: build' "$FAKE_LOG" 2>/dev/null && break
+  sleep 0.1
+done
+start=$(date +%s)
+err="$(FLEET_CARGO_SLOTS=1 FLEET_CARGO_MAX_WAIT=2 PATH="$SANDBOX/bin:$PATH" "$GUARD" check 2>&1 >/dev/null)"
+status=$?
+elapsed=$(( $(date +%s) - start ))
+if (( status == 0 && elapsed >= 2 && elapsed < 15 )) && grep -q 'argv: check' "$FAKE_LOG" \
+  && [[ "$(grep -A3 'argv: check' "$FAKE_LOG" | grep '^grant:')" == "grant: <unset>" ]] \
+  && [[ "$err" == *"proceeding anyway"* ]]; then
+  ok "a queue timeout runs cargo ungated with a notice (${elapsed}s)"
+else
+  bad "a queue timeout runs cargo ungated with a notice" "status=$status elapsed=${elapsed}s err=$err log=$(cat "$FAKE_LOG")"
+fi
+kill "$holder" 2>/dev/null
+wait "$holder" 2>/dev/null
+teardown_fleet
+
+# Inside a command that already holds a grant without `cargo` (a job with
+# need=[test-db] running `cargo test`), the nested request is refused; cargo
+# must still run rather than fail.
+setup_fleet
+PATH="$SANDBOX/bin:$PATH" FLEET_CARGO_GUARD_QUIET=1 \
+  "$FLEET_TEST_BIN" resource run --need test-db -- "$GUARD" test >/dev/null 2>&1
+status=$?
+if (( status == 0 )) && grep -q 'argv: test' "$FAKE_LOG"; then
+  ok "cargo under a grant that lacks cargo still runs (ungated)"
+else
+  bad "cargo under a grant that lacks cargo still runs" "status=$status log=$(cat "$FAKE_LOG")"
+fi
+teardown_fleet
+
+# A fleet that predates `resource run` (it answers unknown subcommands with
+# exit 0 and no output) must not be used — that would "succeed" without
+# running cargo.
+setup_fleet
+cat > "$SANDBOX/bin/old-fleet" <<'OLD'
+#!/usr/bin/env bash
+exit 0
+OLD
+chmod +x "$SANDBOX/bin/old-fleet"
+FLEET_CARGO_FLEET_BIN="$SANDBOX/bin/old-fleet" run_guard build >/dev/null 2>&1
+if grep -q 'argv: build' "$FAKE_LOG" && grep -q 'held: 1' "$FAKE_LOG" && grep -q 'grant: <unset>' "$FAKE_LOG"; then
+  ok "a fleet without resource run falls back to the mkdir slots"
+else
+  bad "a fleet without resource run falls back to the mkdir slots" "$(cat "$FAKE_LOG")"
+fi
+teardown_fleet
+
+fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

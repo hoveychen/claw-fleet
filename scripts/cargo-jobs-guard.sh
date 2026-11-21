@@ -3,7 +3,12 @@
 #
 # Installed as a `cargo` shim ahead of ~/.cargo/bin on PATH (see
 # scripts/install-cargo-guard.sh), this holds a slot for the duration of any
-# compile-heavy cargo invocation and then execs the real cargo. The problem it
+# compile-heavy cargo invocation and runs the real cargo under it. When a
+# `fleet` that has `fleet resource run` is found, the slot is a unit of the
+# machine-global resource `cargo` in Fleet's resource queue (capacity =
+# FLEET_CARGO_SLOTS), so cargo shows up — and can be reordered — next to every
+# other queued resource. Without one it falls back to the mkdir slot store
+# below. The problem it
 # solves is cross-*session*, not cross-target: several agent sessions each type
 # their own `cargo check`, cargo defaults every one of them to jobs = ncpu, and
 # the machine ends up carrying ncpu × sessions concurrent rustc. Rule 3's
@@ -29,10 +34,23 @@
 #   FLEET_CARGO_GUARD_QUIET=1      suppress the "waiting for a slot" notices
 #   FLEET_CARGO_SLOT_ROOT=<dir>    relocate the slot store (tests use this)
 #   FLEET_CARGO_ALLOW_CLEAN=1      permit `cargo clean` against a shared target dir
+#   FLEET_CARGO_FLEET_BIN=<path>   use this fleet for the resource queue; `none`
+#                                  forces the mkdir slot store (tests use both)
 
 set -uo pipefail
 
 GUARD_SELF="${BASH_SOURCE[0]}"
+
+# Re-entry as the command `fleet resource run` starts under its grant (see
+# the resource-queue gate below): note that cargo really started, then become
+# it. Going through the shim rather than a `sh -c` wrapper keeps the queue's
+# view of the command readable (`~/.local/bin/cargo check`).
+if [[ -n "${CARGO_JOBS_GUARD_STARTED:-}" && -n "${CARGO_JOBS_GUARD_REAL:-}" ]]; then
+  : > "$CARGO_JOBS_GUARD_STARTED"
+  guard_real="$CARGO_JOBS_GUARD_REAL"
+  unset CARGO_JOBS_GUARD_STARTED CARGO_JOBS_GUARD_REAL
+  exec "$guard_real" "$@"
+fi
 
 # ── Locate the real cargo ────────────────────────────────────────────────────
 # Resolving by identity rather than by a hardcoded path: the shim is normally
@@ -196,7 +214,97 @@ compute_jobs() {
   printf '%s\n' "$per_slot"
 }
 
-# ── Acquire one of N slots ───────────────────────────────────────────────────
+# ── Preferred gate: Fleet's resource queue ──────────────────────────────────
+# A fleet counts only if it really has `resource run`. Exit status is not
+# enough to tell: older builds answer an unknown subcommand with exit 0 and no
+# output, which would "succeed" without ever running cargo.
+fleet_usable() {
+  [[ -x "$1" ]] && "$1" resource run --help 2>/dev/null | grep -q -- '--need'
+}
+
+find_fleet() {
+  local want="${FLEET_CARGO_FLEET_BIN:-}"
+  if [[ "$want" == "none" ]]; then
+    return 1
+  fi
+  if [[ -n "$want" ]]; then
+    fleet_usable "$want" && { printf '%s\n' "$want"; return 0; }
+    return 1
+  fi
+  local dir candidate canon seen=":"
+  local IFS=:
+  for candidate in $(for dir in $PATH; do printf '%s:' "$dir/fleet"; done) "$HOME/.fleet/bin/fleet"; do
+    [[ -x "$candidate" ]] || continue
+    canon="$(canonical "$candidate")"
+    [[ "$seen" == *":$canon:"* ]] && continue
+    seen="$seen$canon:"
+    if fleet_usable "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# The capacity of `cargo` as recorded in the queue's state file, or nothing.
+# Read straight from the file to skip a locked write on every cargo call when
+# it already matches; any parse miss just means one redundant `resource set`.
+recorded_cargo_capacity() {
+  local state="${FLEET_HOME:-$HOME}/.fleet/resources/state.json"
+  [[ -r "$state" ]] || return 0
+  awk '/^    "cargo": \{/ { getline; if ($1 == "\"capacity\":") { gsub(/[^0-9]/, "", $2); print $2 }; exit }' "$state" 2>/dev/null
+}
+
+FLEET_BIN="$(find_fleet || true)"
+if [[ -n "$FLEET_BIN" ]]; then
+  if [[ "$(recorded_cargo_capacity)" != "$SLOTS" ]]; then
+    # Refused in an incognito session (only `resource run` is allowed there);
+    # the queue then keeps whatever capacity it has.
+    "$FLEET_BIN" resource set cargo --capacity "$SLOTS" >/dev/null 2>&1 || true
+  fi
+  export CARGO_JOBS_GUARD_HELD=1
+  CARGO_BUILD_JOBS="$(compute_jobs)"
+  export CARGO_BUILD_JOBS
+
+  # `fleet resource run` exits with its own codes when the command never
+  # starts (75 queue timeout, 76 cancelled, 64 refused), and cargo's exit code
+  # otherwise — but `cargo run` passes its program's code through, so a 75
+  # could be either. A marker the command drops as it starts tells them apart:
+  # the command is this shim again, which writes it and execs the real cargo.
+  marker_dir="${FLEET_CARGO_SLOT_ROOT:-/tmp/claw-fleet-cargo-slots-$(id -u)}"
+  mkdir -p "$marker_dir" 2>/dev/null || true
+  started="$marker_dir/started.$$"
+  rm -f "$started" 2>/dev/null
+  trap 'rm -f "$started" 2>/dev/null' EXIT
+  CARGO_JOBS_GUARD_STARTED="$started" CARGO_JOBS_GUARD_REAL="$REAL_CARGO" \
+    "$FLEET_BIN" resource run --need cargo --max-wait "${FLEET_CARGO_MAX_WAIT:-1800}" \
+    -- "$GUARD_SELF" "$@"
+  status=$?
+  if [[ -e "$started" ]]; then
+    exit "$status"
+  fi
+  case "$status" in
+    # Cancelled by hand in the queue: the user meant it not to run.
+    76) exit "$status" ;;
+  esac
+  # Interrupted while queued (128 + signal): stop, do not build.
+  (( status > 128 )) && exit "$status"
+  # Never let the gate deadlock or break a build: a queue timeout proceeds
+  # like the old slot wait did, and a refusal (e.g. this command already runs
+  # under a grant that does not include `cargo`) or a broken fleet runs
+  # cargo ungated rather than not at all.
+  if [[ "${FLEET_CARGO_GUARD_QUIET:-0}" != "1" ]]; then
+    if (( status == 75 )); then
+      echo "==> cargo-jobs-guard: waited ${FLEET_CARGO_MAX_WAIT:-1800}s for the cargo resource, proceeding anyway" >&2
+    else
+      echo "==> cargo-jobs-guard: fleet resource run did not start cargo (exit $status), running it ungated" >&2
+    fi
+  fi
+  "$REAL_CARGO" "$@"
+  exit $?
+fi
+
+# ── Fallback gate: acquire one of N mkdir slots ──────────────────────────────
 # A fixed path, deliberately NOT under $TMPDIR. On macOS TMPDIR is a per-user
 # launchd directory, but Fleet spawns its sessions detached — a session that
 # does not inherit that environment falls back to /tmp and would then queue

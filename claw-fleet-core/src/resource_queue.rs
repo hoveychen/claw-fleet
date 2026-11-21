@@ -131,6 +131,26 @@ impl Holder {
     }
 }
 
+/// The command a granted request started: what has to die with its holder.
+///
+/// A holder killed outright (`kill -9`) cannot stop its command, and once the
+/// next pass reaps the holder its resources go to the next request — so the
+/// orphaned command is killed first (see `transact`), or two commands would
+/// use one resource at once.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ChildProc {
+    pid: u32,
+    /// Pid-reuse guard, as for [`Holder`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    start_time: Option<u64>,
+    /// The command leads its own process group (`pgid == pid`), so the whole
+    /// group is killed. Otherwise it shares its holder's group (a foreground
+    /// run in an interactive terminal) and only the command itself is.
+    #[serde(default)]
+    own_group: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
@@ -370,6 +390,9 @@ struct State {
     grants: Vec<ResourceRequest>,
     /// Waiting requests, in queue order.
     queue: Vec<ResourceRequest>,
+    /// Request id → the command its grant started ([`record_child`]). An
+    /// entry lives exactly as long as its grant (`transact` prunes the rest).
+    children: BTreeMap<String, ChildProc>,
 }
 
 /// What one scheduling pass did.
@@ -564,6 +587,32 @@ impl State {
         before != self.grants.len() + self.queue.len()
     }
 
+    /// Drop child entries whose grant is gone, returning the ones to kill: a
+    /// grant that left with its holder dead was reaped, and its command may
+    /// still run. A holder that released while alive has waited for its
+    /// command already, so nothing of it is touched. `before` is the state
+    /// this transaction started from — the only place a reaped grant's
+    /// holder can still be looked up.
+    fn settle_children(&mut self, before: &State, alive: &dyn Fn(&Holder) -> bool) -> Vec<ChildProc> {
+        let mut orphans = Vec::new();
+        let held: Vec<&str> = self.grants.iter().map(|g| g.id.as_str()).collect();
+        self.children.retain(|id, child| {
+            if held.contains(&id.as_str()) {
+                return true;
+            }
+            let holder_dead = before
+                .grants
+                .iter()
+                .find(|g| &g.id == id)
+                .is_some_and(|g| !alive(&g.holder));
+            if holder_dead {
+                orphans.push(child.clone());
+            }
+            false
+        });
+        orphans
+    }
+
     fn set_capacity(&mut self, name: &str, capacity: u32) -> Result<(), String> {
         validate_name(name)?;
         if capacity == 0 {
@@ -745,6 +794,12 @@ fn transact<R>(path: &Path, f: impl FnOnce(&mut State) -> R) -> Result<R, String
     let mut state = load(path)?;
     let before = state.clone();
     let out = f(&mut state);
+    // Whatever `f` did — a pass that reaped a dead holder, an admin removal —
+    // a command left running by a dead holder dies before the new state is
+    // written, i.e. before any waiter can see the grant its resources went to.
+    for orphan in state.settle_children(&before, &holder_alive) {
+        kill_orphan(&orphan);
+    }
     if state != before {
         let json = serde_json::to_vec_pretty(&state).map_err(|e| e.to_string())?;
         crate::atomic_json::write_atomic(path, &json)
@@ -757,6 +812,68 @@ fn transact<R>(path: &Path, f: impl FnOnce(&mut State) -> R) -> Result<R, String
 
 fn holder_alive(h: &Holder) -> bool {
     h.is_alive()
+}
+
+/// How long [`kill_orphan`] waits for a killed command to be gone. It runs
+/// under the state lock, so this bounds how long it can stall the queue.
+const ORPHAN_KILL_WAIT: Duration = Duration::from_secs(3);
+
+/// SIGKILL a reaped grant's command — its process group when it has one —
+/// and wait (bounded) until it is gone. Guarded against pid reuse: a live
+/// process at that pid with another start time is somebody else's.
+#[cfg(unix)]
+fn kill_orphan(child: &ChildProc) {
+    let pid = child.pid as libc::pid_t;
+    if pid <= 1 {
+        return;
+    }
+    let leader_alive = crate::session::is_process_alive(child.pid);
+    if leader_alive && !crate::proc_runner::host_alive(child.pid, child.start_time) {
+        return;
+    }
+    // With the leader gone, a group with its id can only be the rest of the
+    // original group: a pid is not handed out while a group of that id lives.
+    let target = if child.own_group { -pid } else if leader_alive { pid } else { return };
+    if unsafe { libc::kill(target, libc::SIGKILL) } != 0 {
+        return;
+    }
+    crate::log_debug(&format!(
+        "resource_queue: killed the orphaned command {target} of a dead holder"
+    ));
+    let deadline = Instant::now() + ORPHAN_KILL_WAIT;
+    while Instant::now() < deadline {
+        let gone = unsafe { libc::kill(target, 0) } != 0
+            && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+        if gone {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// No process groups to kill by id here; an orphaned command on Windows runs
+/// on (the reaper only frees its resources).
+#[cfg(not(unix))]
+fn kill_orphan(_child: &ChildProc) {}
+
+/// Record the command grant `id` just started, so it is killed if the grant's
+/// holder dies first ([`ChildProc`]). `own_group`: the command leads its own
+/// process group. A no-op when `id` holds nothing (an inherited job).
+pub fn record_child(id: &str, pid: u32, own_group: bool) -> Result<(), String> {
+    record_child_at(&state_path()?, id, pid, own_group)
+}
+
+fn record_child_at(path: &Path, id: &str, pid: u32, own_group: bool) -> Result<(), String> {
+    let child = ChildProc {
+        pid,
+        start_time: crate::session::process_start_time(pid),
+        own_group,
+    };
+    transact(path, |s| {
+        if s.grants.iter().any(|g| g.id == id) {
+            s.children.insert(id.to_string(), child);
+        }
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1242,13 +1359,32 @@ pub fn run_foreground(spec: ForegroundSpec) -> i32 {
     if let Some(g) = &grant {
         cmd.env(GRANT_ENV, g.id());
     }
+    // Off a terminal's foreground (an agent's shell, CI, a job), the command
+    // gets its own process group, so the whole of it — cargo and its rustc
+    // children — can be killed if this process is killed outright. In the
+    // foreground of a terminal it stays in ours: that is the group Ctrl-C
+    // and the terminal's input go to.
+    #[cfg(unix)]
+    let own_group = !fg_signals::in_foreground_group();
+    #[cfg(not(unix))]
+    let own_group = false;
+    #[cfg(unix)]
+    if own_group {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     let code = match cmd.spawn() {
         Ok(mut child) => {
             #[cfg(unix)]
-            fg_signals::set_child(child.id());
+            fg_signals::set_child(child.id(), own_group);
+            if let Some(g) = &grant {
+                if let Err(e) = record_child_at(&g.path, g.id(), child.id(), own_group) {
+                    eprintln!("fleet resource run: could not record the command in the queue: {e}");
+                }
+            }
             let status = child.wait();
             #[cfg(unix)]
-            fg_signals::set_child(0);
+            fg_signals::set_child(0, false);
             match status {
                 Ok(status) => exit_code_of(status),
                 Err(e) => {
@@ -1299,29 +1435,32 @@ fn caught_signal() -> Option<i32> {
 mod fg_signals {
     use std::sync::atomic::{AtomicI32, Ordering};
 
+    /// The running command's pid — negated when it leads its own process
+    /// group, so a forwarded signal reaches the whole group.
     static CHILD: AtomicI32 = AtomicI32::new(0);
     static CAUGHT: AtomicI32 = AtomicI32::new(0);
 
     extern "C" fn on_signal(sig: libc::c_int) {
         CAUGHT.store(sig, Ordering::SeqCst);
-        let child = CHILD.load(Ordering::SeqCst);
-        if child <= 0 {
+        let target = CHILD.load(Ordering::SeqCst);
+        if target == 0 {
             return;
         }
         // Ctrl-C / Ctrl-\ are raised by the terminal for its whole foreground
-        // process group, so the command — in that group with us — has its own
-        // copy. The sender pid cannot tell that case apart: measured on macOS
-        // 27, a terminal-raised SIGINT arrives with a non-zero `si_pid`.
+        // process group, so a command in that group with us has its own copy.
+        // The sender pid cannot tell that case apart: measured on macOS 27, a
+        // terminal-raised SIGINT arrives with a non-zero `si_pid`. A command
+        // in its own group (target < 0) never shares our foreground.
         let keyboard = sig == libc::SIGINT || sig == libc::SIGQUIT;
-        if keyboard && in_foreground_group() {
+        if keyboard && target > 0 && in_foreground_group() {
             return;
         }
-        unsafe { libc::kill(child, sig) };
+        unsafe { libc::kill(target, sig) };
     }
 
     /// Whether this process is in the foreground process group of a terminal
     /// on its stdio. Only async-signal-safe calls: it runs in the handler.
-    fn in_foreground_group() -> bool {
+    pub(super) fn in_foreground_group() -> bool {
         let me = unsafe { libc::getpgrp() };
         (0..=2).any(|fd| unsafe { libc::tcgetpgrp(fd) } == me)
     }
@@ -1338,8 +1477,9 @@ mod fg_signals {
         }
     }
 
-    pub(super) fn set_child(pid: u32) {
-        CHILD.store(pid as i32, Ordering::SeqCst);
+    pub(super) fn set_child(pid: u32, own_group: bool) {
+        let pid = pid as i32;
+        CHILD.store(if own_group { -pid } else { pid }, Ordering::SeqCst);
     }
 
     pub(super) fn caught() -> Option<i32> {
@@ -1629,6 +1769,30 @@ mod tests {
         let pass = s.schedule(&|h: &Holder| h.pid != 10, 3);
         assert_eq!(pass.reaped, vec!["holder"]);
         assert_eq!(pass.granted, vec!["next"]);
+    }
+
+    /// A command a dead holder left running is handed back for killing; one
+    /// whose holder released while alive (it waited for its command) is not.
+    #[test]
+    fn only_a_reaped_grant_leaves_its_command_to_be_killed() {
+        let child = |pid| ChildProc { pid, start_time: Some(7), own_group: true };
+        let mut s = State::default();
+        submit(&mut s, req_pid("dead", &["a"], 10));
+        submit(&mut s, req_pid("done", &["b"], 20));
+        submit(&mut s, req_pid("running", &["c"], 30));
+        s.children.insert("dead".into(), child(11));
+        s.children.insert("done".into(), child(21));
+        s.children.insert("running".into(), child(31));
+        let before = s.clone();
+        let alive = |h: &Holder| h.pid != 10;
+
+        assert!(s.remove("done"), "released by its live holder");
+        let pass = s.schedule(&alive, 2);
+        assert_eq!(pass.reaped, vec!["dead"]);
+        let orphans = s.settle_children(&before, &alive);
+        assert_eq!(orphans, vec![child(11)], "only the dead holder's command");
+        assert_eq!(s.children.keys().collect::<Vec<_>>(), vec!["running"], "entries live as long as their grant");
+        assert!(s.settle_children(&s.clone(), &alive).is_empty(), "settling again changes nothing");
     }
 
     #[test]
