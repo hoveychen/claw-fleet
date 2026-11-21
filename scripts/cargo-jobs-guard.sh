@@ -41,6 +41,17 @@ set -uo pipefail
 
 GUARD_SELF="${BASH_SOURCE[0]}"
 
+# Re-entry as the command `fleet resource run` starts under its grant (see
+# the resource-queue gate below): note that cargo really started, then become
+# it. Going through the shim rather than a `sh -c` wrapper keeps the queue's
+# view of the command readable (`~/.local/bin/cargo check`).
+if [[ -n "${CARGO_JOBS_GUARD_STARTED:-}" && -n "${CARGO_JOBS_GUARD_REAL:-}" ]]; then
+  : > "$CARGO_JOBS_GUARD_STARTED"
+  guard_real="$CARGO_JOBS_GUARD_REAL"
+  unset CARGO_JOBS_GUARD_STARTED CARGO_JOBS_GUARD_REAL
+  exec "$guard_real" "$@"
+fi
+
 # ── Locate the real cargo ────────────────────────────────────────────────────
 # Resolving by identity rather than by a hardcoded path: the shim is normally
 # installed as ~/.local/bin/cargo, so a naive `command -v cargo` would find
@@ -258,15 +269,16 @@ if [[ -n "$FLEET_BIN" ]]; then
   # `fleet resource run` exits with its own codes when the command never
   # starts (75 queue timeout, 76 cancelled, 64 refused), and cargo's exit code
   # otherwise — but `cargo run` passes its program's code through, so a 75
-  # could be either. A marker the command drops as it starts tells them apart.
+  # could be either. A marker the command drops as it starts tells them apart:
+  # the command is this shim again, which writes it and execs the real cargo.
   marker_dir="${FLEET_CARGO_SLOT_ROOT:-/tmp/claw-fleet-cargo-slots-$(id -u)}"
   mkdir -p "$marker_dir" 2>/dev/null || true
   started="$marker_dir/started.$$"
   rm -f "$started" 2>/dev/null
   trap 'rm -f "$started" 2>/dev/null' EXIT
-  # shellcheck disable=SC2016
-  "$FLEET_BIN" resource run --need cargo --max-wait "${FLEET_CARGO_MAX_WAIT:-1800}" \
-    -- /bin/sh -c ': > "$0"; exec "$@"' "$started" "$REAL_CARGO" "$@"
+  CARGO_JOBS_GUARD_STARTED="$started" CARGO_JOBS_GUARD_REAL="$REAL_CARGO" \
+    "$FLEET_BIN" resource run --need cargo --max-wait "${FLEET_CARGO_MAX_WAIT:-1800}" \
+    -- "$GUARD_SELF" "$@"
   status=$?
   if [[ -e "$started" ]]; then
     exit "$status"
