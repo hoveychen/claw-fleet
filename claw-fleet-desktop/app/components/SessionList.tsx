@@ -15,6 +15,7 @@ import { ProjectsView } from "./ProjectsView";
 import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
 import { TerminalView } from "./TerminalView";
+import { ResourcesView } from "./ResourcesView";
 import { PluginsView } from "./PluginsView";
 import { MobileView } from "./MobileView";
 import { HistoryView } from "./HistoryView";
@@ -330,6 +331,8 @@ export function SessionList() {
             <TopProgress active />
           </div>
         )
+      ) : viewMode === "resources" ? (
+        <ResourcesView />
       ) : viewMode === "plugins" ? (
         <PluginsView />
       ) : viewMode === "mobile" ? (

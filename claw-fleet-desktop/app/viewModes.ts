@@ -25,6 +25,7 @@ export const ALL_VIEW_MODES = [
   "plugins",
   "projects",
   "terminal",
+  "resources",
   "mobile",
 ] as const;
 

@@ -15,6 +15,7 @@ import type { PromoScene } from "./promo-scene";
 import { DEMO_BOARD, RELAY_CHAINS, RELAY_PATH_TO_ID, RELAY_SESSIONS } from "./demoData";
 import { RELAY_SCRIPTS } from "./demoScripts";
 import { LIVE_MODE, installLiveProxy, liveInvoke } from "./liveProxy";
+import { handleResourceIPC } from "./resources";
 import {
   mockIngestBatch,
   mockBackfillStart,
@@ -883,6 +884,13 @@ async function handleIPC(
       return null;
     case "kill_workspace_proc":
       return killMockProc(args.id as string);
+    case "resource_snapshot":
+    case "resource_move":
+    case "resource_cancel":
+    case "resource_set_capacity":
+    case "resource_kick":
+    case "resource_remove":
+      return handleResourceIPC(cmd, args);
     case "search_sessions": {
       // Real-shaped FTS over the mock transcripts: match any message whose
       // JSON carries the query, so the search → open-with-query → fold
