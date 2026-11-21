@@ -47,6 +47,7 @@ mod notes;
 mod plan_approval;
 mod plugins;
 mod proc_runner;
+mod resources;
 mod process;
 mod preview_image;
 mod schedule;
@@ -78,6 +79,7 @@ use self::notification::*;
 use self::plan_approval::*;
 use self::plugins::*;
 use self::proc_runner::*;
+use self::resources::*;
 use self::process::*;
 use self::preview_image::*;
 use self::schedule::*;
@@ -1709,6 +1711,12 @@ pub fn run() {
             write_workspace_proc_input,
             resize_workspace_proc,
             clear_workspace_procs,
+            resource_snapshot,
+            resource_move,
+            resource_cancel,
+            resource_set_capacity,
+            resource_kick,
+            resource_remove,
             keep_awake_supported,
             get_keep_awake,
             set_keep_awake,

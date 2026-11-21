@@ -27,6 +27,7 @@ pub type AccountInfoFuture =
 /// Generic future for per-source account/usage data (returns untyped JSON).
 pub type SourceDataFuture = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
 use crate::log_debug;
+use claw_fleet_core::resource_queue as rq;
 use crate::search_index::SearchIndex;
 use crate::session::{SessionInfo, SessionStatus};
 
@@ -2682,6 +2683,33 @@ impl LocalBackend {
         claw_fleet_core::session_title::set_title(&session_id, &workspace_path, title)?;
         self.restamp_marks_and_emit();
         Ok(())
+    }
+
+    // ── Resource queue (machine-global; see claw_fleet_core::resource_queue) ──
+
+    pub fn resource_snapshot(&self) -> Result<rq::ResourceSnapshot, String> {
+        rq::snapshot()
+    }
+
+    pub fn resource_move(&self, id: String, target: rq::MoveTarget) -> Result<rq::ResourceSnapshot, String> {
+        rq::move_request(&id, &target)
+    }
+
+    pub fn resource_cancel(&self, id: String) -> Result<rq::ResourceSnapshot, String> {
+        rq::cancel_request(&id)
+    }
+
+    pub fn resource_set_capacity(&self, name: String, capacity: u32) -> Result<rq::ResourceSnapshot, String> {
+        rq::set_capacity(&name, capacity)
+    }
+
+    /// Blocks up to twice `rq::KICK_GRACE` while the holder lets go.
+    pub fn resource_kick(&self, id: String) -> Result<rq::ResourceSnapshot, String> {
+        rq::kick(&id)
+    }
+
+    pub fn resource_remove(&self, name: String) -> Result<rq::ResourceSnapshot, String> {
+        rq::remove_resource(&name)
     }
 
     pub fn list_procs(&self) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {

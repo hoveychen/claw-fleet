@@ -281,6 +281,15 @@ pub const PROC_OUTPUT: &str = "/proc_output";
 pub const PROC_RESIZE: &str = "/proc_resize";
 pub const PROC_RUN: &str = "/proc_run";
 pub const PROCS: &str = "/procs";
+/// The machine-global resource queue (`resource_queue`): the table, and the
+/// hand adjustments the resource panel makes. Every write answers with the
+/// table as it stands afterwards.
+pub const RESOURCES: &str = "/resources";
+pub const RESOURCES_MOVE: &str = "/resources/move";
+pub const RESOURCES_CANCEL: &str = "/resources/cancel";
+pub const RESOURCES_CAPACITY: &str = "/resources/capacity";
+pub const RESOURCES_KICK: &str = "/resources/kick";
+pub const RESOURCES_REMOVE: &str = "/resources/remove";
 /// `GET /host_features` — which optional surfaces this host exposes
 /// ([`crate::feature_flags::HostFeatures`]). Read once at boot by the browser
 /// build so its nav matches what this backend will allow, rather than offering
