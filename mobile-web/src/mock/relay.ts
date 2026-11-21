@@ -56,6 +56,8 @@ import {
 
 import scenes from "../../../scripts/site/fixtures/scenes.json";
 import { localizeMock } from "./demoLocale";
+import { mockResourceCancel, mockResourceMove, mockResourceSnapshot } from "./resources";
+import type { MoveTarget } from "../generated/types";
 
 /** Host continuation switches (`resume_settings`); `set_resume_settings` merges into it. */
 let mockResumeSettings: Record<string, unknown> = {
@@ -260,6 +262,12 @@ export class MockRelayClient extends RelayClient {
         return MOCK_DAILY_ATTENTION;
       case "adopt_lesson":
         return null;
+      case "resource_list":
+        return mockResourceSnapshot();
+      case "resource_move":
+        return mockResourceMove(String(params?.id), params?.target as MoveTarget);
+      case "resource_cancel":
+        return mockResourceCancel(String(params?.id));
       // dsh has no transcript file, so both of these are RPC-only — which is
       // exactly why they needed mocking: without them the dsh Token tab was
       // blank everywhere except against a live relay.

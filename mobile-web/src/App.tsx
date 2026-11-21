@@ -110,6 +110,7 @@ import { sessionDetailKey } from "./sessionDetailKey";
 import { TasksView } from "./views/TasksView";
 import { UsageView } from "./views/UsageView";
 import { AttentionView } from "./views/AttentionView";
+import { ResourcesView } from "./views/ResourcesView";
 import { WikiDocView } from "./views/WikiDocView";
 import { fetchWikiDoc } from "./libraryApi";
 import { Presence } from "./Presence";
@@ -745,6 +746,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
 
   const [terminal, setTerminal] = useState<{ workspace: TerminalWorkspace | null } | null>(null);
   const [showAttention, setShowAttention] = useState(false);
+  const [showResources, setShowResources] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
   // Which device the new session opens on. null = follow the current scoped device
   // (reset on every sheet open), unless the user explicitly picks a different device
@@ -1130,6 +1132,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
     repoDetail !== null ||
     showUsage ||
     showAttention ||
+    showResources ||
     showNewSession;
   // Float the decision drawer over everything the user is looking at — EXCEPT the
   // plain decisions tab, which already renders cards inline (no overlay on top of it),
@@ -1146,6 +1149,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const overlayKey = [
     detailSession ? `detail:${detailSession.deviceId}:${detailSession.id}` : "",
     showAttention ? "attention" : "",
+    showResources ? "resources" : "",
     wikiStack.length ? `wiki:${wikiStack.length}:${wikiStack[wikiStack.length - 1].doc.slug}` : "",
     showRepo ? "repo" : "",
     repoDetail ? `repoDetail:${repoDetail.repo.root}` : "",
@@ -1167,6 +1171,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const closeAllOverlays = useCallback(() => {
     setDetailStack([]);
     setShowAttention(false);
+    setShowResources(false);
     setWikiStack([]);
     setShowRepo(false);
     setRepoDetail(null);
@@ -1497,6 +1502,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             agentPending={agentPending}
             onOpenRepo={() => setShowRepo(true)}
             onOpenAttention={() => setShowAttention(true)}
+            onOpenResources={() => setShowResources(true)}
             onOpenUsage={() => setShowUsage(true)}
           />
         )}
@@ -1534,6 +1540,11 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
           onBack={() => setShowAttention(false)}
           onOpenSession={(id) => openSessionRoot(activeDeviceId, id)}
         />
+      </Presence>
+
+      {showResources && <HistoryLayer onBack={() => setShowResources(false)} />}
+      <Presence when={showResources}>
+        <ResourcesView client={client} onBack={() => setShowResources(false)} />
       </Presence>
 
       <div className={sheetPeek ? styles.aboveSheet : undefined}>

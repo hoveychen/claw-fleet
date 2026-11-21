@@ -1,0 +1,225 @@
+/* Resource queue page: fullscreen overlay from More, same z-level 30 and the
+   same bordered card language as AttentionView. */
+.page {
+  composes: page_enter from "../motion.module.css";
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+}
+
+.view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 12px calc(16px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.count {
+  font-size: var(--t-aux, 12px);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.hint {
+  color: var(--color-text-secondary);
+  font-size: var(--t-ui, 14px);
+  padding: 20px 4px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.actionError {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-error);
+  border-radius: 10px;
+  color: var(--color-error);
+  font-size: var(--t-aux, 12px);
+  line-height: 1.45;
+}
+
+.actionError > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dismiss {
+  flex-shrink: 0;
+  display: inline-flex;
+  padding: 2px;
+  color: inherit;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg-card);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.name {
+  font-size: var(--t-ui, 14px);
+  font-weight: 600;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* Outlined badge; turns accent when every unit is taken. */
+.usage {
+  font-size: var(--t-meta, 11px);
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+}
+
+.usage[data-full] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.blockLabel {
+  font-size: var(--t-meta, 11px);
+  font-weight: 600;
+  color: var(--color-text-dim);
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+}
+
+.rowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.position {
+  flex-shrink: 0;
+  font-size: var(--t-meta, 11px);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-running);
+}
+
+.command {
+  min-width: 0;
+  font-size: var(--t-aux, 12px);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-dim);
+  overflow-wrap: anywhere;
+}
+
+.priority {
+  padding: 0 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+}
+
+.priority[data-priority="high"] {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.wait {
+  font-size: var(--t-meta, 11px);
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.controls {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 34px);
+  gap: 4px;
+}
+
+.iconBtn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.iconBtn:active {
+  background: var(--color-bg-card-hover);
+}
+
+.iconBtn:disabled {
+  opacity: 0.35;
+}
+
+.iconBtn[data-danger] {
+  color: var(--color-error);
+}
+
+.idle {
+  font-size: var(--t-aux, 12px);
+  color: var(--color-text-dim);
+}

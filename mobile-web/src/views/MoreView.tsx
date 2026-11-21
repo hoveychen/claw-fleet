@@ -9,6 +9,7 @@ import {
   ChevronRight,
   FolderGit2,
   Scale,
+  Layers,
   Gauge,
   QrCode,
   SquareTerminal,
@@ -72,6 +73,7 @@ interface Props {
   agentPending?: boolean;
   onOpenRepo: () => void;
   onOpenAttention: () => void;
+  onOpenResources: () => void;
   onOpenUsage: () => void;
   onOpenTerminal: () => void;
   /** Whether this desktop machine has terminal UI (backend FLEET_TERMINAL, see
@@ -121,6 +123,7 @@ export function MoreView({
   agentPending = false,
   onOpenRepo,
   onOpenAttention,
+  onOpenResources,
   onOpenUsage,
   onOpenTerminal,
   terminalEnabled,
@@ -747,6 +750,17 @@ export function MoreView({
             <span className={styles.navText}>
               <span className={styles.navLabel}>{t("需要你判断的事")}</span>
               <span className={styles.navSub}>{t("跑偏的任务、反复出现的教训")}</span>
+            </span>
+            <ChevronRight size={18} className={styles.navChevron} />
+          </button>
+          <div className={styles.divider} />
+          <button className={styles.navRow} onClick={onOpenResources}>
+            <span className={styles.navIcon}>
+              <Layers size={18} />
+            </span>
+            <span className={styles.navText}>
+              <span className={styles.navLabel}>{t("资源与排队")}</span>
+              <span className={styles.navSub}>{t("本机资源锁：谁在占用、谁在排队")}</span>
             </span>
             <ChevronRight size={18} className={styles.navChevron} />
           </button>
