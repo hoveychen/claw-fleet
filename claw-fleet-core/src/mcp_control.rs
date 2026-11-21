@@ -677,7 +677,21 @@ fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, Str
                 None => cwd.to_path_buf(),
             };
             let exe = std::env::current_exe().map_err(|e| format!("cannot locate fleet: {e}"))?;
-            let rec = job::run(&exe, &dir.to_string_lossy(), &command, sid)?;
+            let opts = job_run_options(args)?;
+            let rec = job::run(&exe, &dir.to_string_lossy(), &command, sid, &opts)?;
+            let queued = match rec.queue.as_ref() {
+                None => String::new(),
+                Some(q) if q.inherited_from.is_some() => format!(
+                    "resources: {} — already held by the enclosing grant {}, so it did not queue.\n",
+                    crate::resource_queue::format_needs(&q.needs),
+                    q.inherited_from.as_deref().unwrap_or_default()
+                ),
+                Some(q) => format!(
+                    "resources: {} — the command starts once all of them are granted to this job \
+                     at the same time; until then its status is `queued` (see `fleet resource ls`).\n",
+                    crate::resource_queue::format_needs(&q.needs)
+                ),
+            };
             if flag(args, "wake") {
                 let wake = match register_job_wake(sid, &exe, &rec, arg(args, "note").as_deref()) {
                     Ok(t) => t,
@@ -688,14 +702,14 @@ fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, Str
                     }
                 };
                 return Ok(format!(
-                    "ok: job {} started in {}.\nlog: {}\n{wake}",
+                    "ok: job {} started in {}.\nlog: {}\n{queued}{wake}",
                     rec.id,
                     rec.workspace_path,
                     job::log_path(&rec.id)?.display()
                 ));
             }
             Ok(format!(
-                "ok: job {id} started in {dir}.\nlog: {log}\n\
+                "ok: job {id} started in {dir}.\nlog: {log}\n{queued}\
                  Keep working; collect it with action=wait id={id} (blocks up to {max}s per call — \
                  call again while it is still running). Do not end your turn or return from a \
                  subagent while it runs unless you registered wake.",
@@ -734,7 +748,13 @@ fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, Str
         }
         "stop" => {
             let id = req(args, "id")?;
+            let was_queued = job::get(&id).is_ok_and(|r| r.status == crate::proc_runner::ProcStatus::Queued);
             job::stop(&id)?;
+            if was_queued {
+                return Ok(format!(
+                    "ok: job {id} was still queued for its resources; its request is cancelled and the command will not run."
+                ));
+            }
             Ok(format!("ok: sent SIGTERM to job {id}'s process group (SIGKILL after 2s)."))
         }
         "list" => {
@@ -751,6 +771,34 @@ fn handle_job(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, Str
         }
         other => Err(format!("unknown job action: {other}")),
     }
+}
+
+/// The resource side of `fleet__job run`: `need` (a list of `name[:units]`, or
+/// one such string), `priority` (high / normal / low) and `max_wait` (`30m`,
+/// `90s`, or bare seconds).
+fn job_run_options(args: &Value) -> Result<crate::job::RunOptions, String> {
+    let specs: Vec<String> = match args.get("need") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::String(s)) => vec![s.clone()],
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|v| v.as_str().map(str::to_string).ok_or("`need` must be a list of strings like \"test-db\" or \"gpu:2\""))
+            .collect::<Result<_, _>>()?,
+        Some(_) => return Err("`need` must be a list of strings like \"test-db\" or \"gpu:2\"".into()),
+    };
+    let needs = crate::resource_queue::parse_needs(&specs)?;
+    let priority = match arg(args, "priority") {
+        Some(p) => p.parse()?,
+        None => Default::default(),
+    };
+    let max_wait = match arg(args, "max_wait") {
+        Some(w) => Some(std::time::Duration::from_secs(crate::watch::parse_duration_secs(&w)?)),
+        None => None,
+    };
+    if needs.is_empty() && (arg(args, "priority").is_some() || max_wait.is_some()) {
+        return Err("`priority` and `max_wait` only apply to a job that declares resources with `need`".into());
+    }
+    Ok(crate::job::RunOptions { needs, priority, max_wait })
 }
 
 // ── arg helpers ──────────────────────────────────────────────────────────────

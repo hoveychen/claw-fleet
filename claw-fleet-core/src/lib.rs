@@ -135,6 +135,7 @@ pub mod relay_region;
 pub mod relay_events;
 pub mod relay_http;
 pub mod relay_role;
+pub mod resource_queue;
 pub mod routes;
 pub mod ui_types;
 /// Path helpers, formerly re-exported from the (removed) `claw-fleet-task`

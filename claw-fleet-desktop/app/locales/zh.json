@@ -2789,6 +2789,7 @@
     "proc_execution": "执行记录",
     "proc_running": "运行中",
     "proc_starting": "启动中",
+    "proc_queued": "排队等资源",
     "proc_exited": "已退出 ({{code}})",
     "proc_exited_unknown": "已退出",
     "proc_took": "用时 {{d}}",

@@ -147,6 +147,12 @@ enum Commands {
         #[command(subcommand)]
         action: JobCommands,
     },
+    /// Machine-global named resources (a test database, a device, a build
+    /// slot) that commands queue for instead of inventing their own locks.
+    Resource {
+        #[command(subcommand)]
+        action: ResourceCommands,
+    },
     /// Start the HTTP probe server (used by Fleet app for remote monitoring)
     Serve {
         /// Port to listen on.  Pass 0 to let the OS pick a free ephemeral port;
@@ -1024,6 +1030,19 @@ pub(crate) enum JobCommands {
         /// (top-level sessions only).
         #[arg(long)]
         wake: bool,
+        /// A machine-global resource the command needs exclusively while it
+        /// runs: `test-db`, or `gpu:2` for two units. Repeat for several. The
+        /// job waits in the queue until it can have all of them at once, and
+        /// holds none of them while it waits. See `fleet resource ls`.
+        #[arg(long = "need", value_name = "NAME[:UNITS]")]
+        need: Vec<String>,
+        /// Place in the resource queue: high, normal (default) or low.
+        #[arg(long, requires = "need")]
+        priority: Option<String>,
+        /// Give up after this long in the queue (`30m`, `90s`, `2h`): the job
+        /// ends with exit code 75 and its command never runs.
+        #[arg(long = "max-wait", requires = "need", value_name = "DURATION")]
+        max_wait: Option<String>,
     },
     /// Block until the job exits or the timeout passes (max 540s).
     Wait {
@@ -1049,6 +1068,55 @@ pub(crate) enum JobCommands {
     /// watch polls.
     #[command(hide = true)]
     Done { id: String },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ResourceCommands {
+    /// Run a command in the foreground while holding resources: queue, run it
+    /// with this terminal's stdin/stdout, release when it exits, and return
+    /// its exit code. `fleet resource run --need cargo -- cargo test`.
+    Run {
+        /// `name` or `name:units`. Repeat for several; all are granted at once
+        /// or none is held.
+        #[arg(long = "need", value_name = "NAME[:UNITS]", required = true)]
+        need: Vec<String>,
+        /// Place in the queue: high, normal (default) or low.
+        #[arg(long)]
+        priority: Option<String>,
+        /// Give up after this long in the queue (`30m`, `90s`, `2h`) and exit
+        /// 75 without running the command.
+        #[arg(long = "max-wait", value_name = "DURATION")]
+        max_wait: Option<String>,
+        /// The command and its arguments (run directly, not through a shell).
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+    /// Show every resource, who holds it, and the queue with what each
+    /// request is waiting on.
+    Ls {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move a queued request: `--to 1` puts it at the head, `--before <id>`
+    /// directly ahead of another queued request.
+    Move {
+        /// Request id (a job id, or an `r…` id from `fleet resource ls`).
+        id: String,
+        /// 1-based queue position.
+        #[arg(long, conflicts_with = "before", required_unless_present = "before")]
+        to: Option<usize>,
+        #[arg(long)]
+        before: Option<String>,
+    },
+    /// Take a queued request out of the queue; its command never runs. A
+    /// request that is already running is stopped with `fleet job stop`.
+    Cancel { id: String },
+    /// Set how many units a resource has (default 1), creating it if needed.
+    Set {
+        name: String,
+        #[arg(long)]
+        capacity: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1758,6 +1826,7 @@ fn main() {
         Commands::Wiki { action } => commands::wiki::cmd_wiki(action),
         Commands::Library { action } => commands::library::cmd_library(action),
         Commands::Job { action } => commands::job::cmd_job(action),
+        Commands::Resource { action } => commands::resource::cmd_resource(action),
         Commands::Notes { action, session } => commands::notes::cmd_notes(action, session.as_deref()),
         Commands::History { action } => commands::notes::cmd_history(action),
         Commands::Task { action, session } => commands::notes::cmd_task(action, session.as_deref()),

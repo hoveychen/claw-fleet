@@ -56,6 +56,9 @@ const STARTING_TIMEOUT_MS: u64 = 15_000;
 #[serde(rename_all = "lowercase")]
 pub enum ProcStatus {
     Starting,
+    /// The host is alive and waiting in the resource queue
+    /// ([`crate::resource_queue`]); the command has not been started.
+    Queued,
     Running,
     Exited,
 }
@@ -85,6 +88,10 @@ pub struct ProcRecord {
     pub finished_ms: Option<u64>,
     pub cols: u16,
     pub rows: u16,
+    /// Present on a job that declared resources (`fleet job run --need …`):
+    /// what it needs and how its time in the queue went.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub queue: Option<crate::resource_queue::JobQueue>,
 }
 
 /// One incremental read of a proc's pty output. `record` piggybacks the
@@ -352,6 +359,21 @@ pub fn spawn_proc_in(
     cols: u16,
     rows: u16,
 ) -> Result<ProcRecord, String> {
+    spawn_proc_queued_in(dir, host_exe, workspace_path, command, cols, rows, None)
+}
+
+/// [`spawn_proc_in`] for a command that declared resources: with `queue` set,
+/// the host waits in the resource queue and starts the command only once
+/// everything in `queue.needs` is granted to it.
+pub fn spawn_proc_queued_in(
+    dir: &Path,
+    host_exe: &Path,
+    workspace_path: &str,
+    command: &str,
+    cols: u16,
+    rows: u16,
+    queue: Option<crate::resource_queue::JobQueue>,
+) -> Result<ProcRecord, String> {
     // A blank command means "just give me a terminal here" — the caller (a
     // terminal panel) has no business knowing what this host's shell is, and
     // guessing client-side would get Windows wrong.
@@ -389,6 +411,7 @@ pub fn spawn_proc_in(
         finished_ms: None,
         cols,
         rows,
+        queue,
     };
     write_record(dir, &rec)?;
 
@@ -480,21 +503,29 @@ pub fn output_file_in(dir: &Path, id: &str) -> PathBuf {
     out_path(dir, id)
 }
 
+/// Whether the process that reported itself as `pid`, started at
+/// `start_time`, is still running. The start time defends against pid reuse;
+/// without one (it could not be read at the time) only the pid is checked.
+/// Shared with the resource queue, whose holders are identified the same way.
+pub(crate) fn host_alive(pid: u32, start_time: Option<u64>) -> bool {
+    crate::session::is_process_alive(pid)
+        && (start_time.is_none() || crate::session::process_start_time(pid) == start_time)
+}
+
 /// Returns true (and mutates `rec` to `exited`) when the record claims to be
 /// live but its host process is provably gone.
 fn heal_stale(dir: &Path, rec: &mut ProcRecord) -> bool {
     // Lazy: almost every record on disk is long `Exited`, and probing a pid
     // for each of them on every list poll was measurable.
     let host_alive = || match (rec.host_pid, rec.host_start_time) {
-        (Some(pid), start) => {
-            crate::session::is_process_alive(pid)
-                && (start.is_none() || crate::session::process_start_time(pid) == start)
-        }
+        (Some(pid), start) => host_alive(pid, start),
         (None, _) => false,
     };
     let stale = match rec.status {
         ProcStatus::Exited => false,
-        ProcStatus::Running => !host_alive(),
+        // A queued host reports its pid before it starts waiting, so a dead
+        // one is as provable as a dead running one.
+        ProcStatus::Running | ProcStatus::Queued => !host_alive(),
         ProcStatus::Starting => {
             !host_alive() && now_ms().saturating_sub(rec.started_ms) > STARTING_TIMEOUT_MS
         }
@@ -522,6 +553,12 @@ pub fn kill_proc(id: &str, force: bool) -> Result<(), String> {
 pub fn kill_proc_in(dir: &Path, id: &str, force: bool) -> Result<(), String> {
     let rec = read_record(dir, id)?;
     if rec.status == ProcStatus::Exited {
+        return Ok(());
+    }
+    // Still waiting for its resources: there is no command to signal. Taking
+    // the request out of the queue makes the host record the job as cancelled.
+    // If it was granted in the meantime, fall through and kill the command.
+    if rec.status == ProcStatus::Queued && crate::resource_queue::cancel_request(id).is_ok() {
         return Ok(());
     }
     let Some(pgid) = rec.child_pid else {
@@ -719,7 +756,7 @@ pub fn host_main(id: &str) -> ! {
         .map(PathBuf::from)
         .or_else(procs_dir);
     let code = match dir {
-        Some(dir) => match run_host(&dir, id) {
+        Some(dir) => match queue_then_run(&dir, id) {
             Ok(code) => code,
             Err(e) => {
                 eprintln!("fleet-proc-host {id}: {e}");
@@ -733,6 +770,97 @@ pub fn host_main(id: &str) -> ! {
         }
     };
     std::process::exit(code)
+}
+
+/// The whole life of a host: wait in the resource queue if the job declared
+/// resources, run the command, release. A job without `queue` goes straight to
+/// [`run_host`], exactly as before the queue existed.
+///
+/// The host is the holder — `(pid, start time)` of this process — so the
+/// resources come back the moment it exits, and are reaped by anyone's next
+/// scheduling pass if it is killed.
+fn queue_then_run(dir: &Path, id: &str) -> Result<i32, String> {
+    use crate::resource_queue::{self as rq, AcquireError, QueueEnd};
+
+    let mut rec = read_record(dir, id)?;
+    let Some(queue) = rec.queue.clone().filter(|q| q.inherited_from.is_none()) else {
+        return run_host(dir, id);
+    };
+
+    // Report in before waiting: `heal_stale` needs the pid to tell a queued
+    // job from one whose host died in the queue.
+    let host_pid = std::process::id();
+    rec.status = ProcStatus::Queued;
+    rec.host_pid = Some(host_pid);
+    rec.host_start_time = crate::session::process_start_time(host_pid);
+    write_record(dir, &rec)?;
+
+    // An incognito session's command stays in its private store.
+    let private = is_private_dir(dir);
+    let acquired = rq::acquire(
+        rq::AcquireSpec {
+            id: rec.id.clone(),
+            kind: rq::RequestKind::Job,
+            needs: queue.needs.clone(),
+            priority: queue.priority,
+            max_wait: queue.max_wait_ms.map(std::time::Duration::from_millis),
+            command: if private { String::new() } else { rec.command.clone() },
+            workspace: (!private).then(|| rec.workspace_path.clone()),
+            session_id: queue.session_id.clone().filter(|_| !private),
+        },
+        |_| false,
+    );
+    let grant = match acquired {
+        Ok(grant) => grant,
+        Err(e) => {
+            // The command never ran. Say why in the job's own log, where
+            // `fleet job wait` shows it, and end with a code no command uses.
+            let (end, code) = match &e {
+                AcquireError::Timeout { .. } => (QueueEnd::Timeout, rq::EXIT_QUEUE_TIMEOUT),
+                AcquireError::Cancelled | AcquireError::Aborted => {
+                    (QueueEnd::Cancelled, rq::EXIT_QUEUE_CANCELLED)
+                }
+                AcquireError::Rejected(_) => (QueueEnd::Rejected, rq::EXIT_QUEUE_REJECTED),
+            };
+            let _ = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(out_path(dir, id))
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    writeln!(f, "fleet: {e}")
+                });
+            let mut rec = read_record(dir, id)?;
+            rec.status = ProcStatus::Exited;
+            rec.exit_code = Some(code);
+            rec.finished_ms = Some(now_ms());
+            if let Some(q) = rec.queue.as_mut() {
+                q.end = Some(end);
+            }
+            write_record(dir, &rec)?;
+            eprintln!("fleet-proc-host {id}: left the resource queue: {e}");
+            return Ok(0);
+        }
+    };
+
+    let mut rec = read_record(dir, id)?;
+    if let Some(q) = rec.queue.as_mut() {
+        q.granted_ms = Some(now_ms());
+    }
+    write_record(dir, &rec)?;
+    let result = run_host(dir, id);
+    grant.release();
+    result
+}
+
+/// The environment a job's command gets on top of the host's own: the id of
+/// the grant it runs under, so a nested `--need` can be resolved against it
+/// ([`crate::resource_queue::check_nested`]). A job that inherited an outer
+/// grant already has that grant's id in its environment.
+fn grant_env(rec: &ProcRecord) -> Option<(&'static str, String)> {
+    let q = rec.queue.as_ref()?;
+    (q.inherited_from.is_none() && q.granted_ms.is_some())
+        .then(|| (crate::resource_queue::GRANT_ENV, rec.id.clone()))
 }
 
 /// Best-effort: record the host-side failure so the UI shows an exited proc
@@ -819,6 +947,9 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::from(out_file))
         .stderr(std::process::Stdio::from(err_clone));
+    if let Some((key, value)) = grant_env(&rec) {
+        cmd.env(key, value);
+    }
     let mut child = cmd.spawn().map_err(|e| format!("spawn cmd /S /C: {e}"))?;
     drop(cmd);
 
@@ -959,6 +1090,9 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
         .stdin(stdio(&slave_fd)?)
         .stdout(stdio(&slave_fd)?)
         .stderr(stdio(&slave_fd)?);
+    if let Some((key, value)) = grant_env(&rec) {
+        cmd.env(key, value);
+    }
     unsafe {
         cmd.pre_exec(|| {
             // New session + controlling tty: makes the command (and every
@@ -1183,6 +1317,7 @@ mod tests {
             finished_ms: None,
             cols: 80,
             rows: 24,
+            queue: None,
         };
         write_record(dir, &rec).unwrap();
         rec

@@ -23,6 +23,7 @@ pub(crate) mod plan;
 pub(crate) mod prd;
 pub(crate) mod recent_sessions;
 pub(crate) mod report;
+pub(crate) mod resource;
 pub(crate) mod schedule;
 pub(crate) mod search;
 pub(crate) mod serve;

@@ -637,14 +637,50 @@ lessons: Array<Lesson>,
 terminatedAt: number, 
 generatedAt: number, };
 
-export type ProcStatus = "starting" | "running" | "exited";
+export type Priority = "high" | "normal" | "low";
+
+export type QueueEnd = "timeout" | "cancelled" | "rejected";
+
+export type JobQueue = { needs: { [key in string]: number }, priority: Priority, maxWaitMs?: number | null, 
+sessionId?: string | null, 
+inheritedFrom?: string | null, grantedMs?: number | null, end?: QueueEnd | null, };
+
+export type ProcStatus = "starting" | "queued" | "running" | "exited";
 
 export type ProcRecord = { id: string, workspacePath: string, command: string, status: ProcStatus, 
 childPid?: number | null, hostPid?: number | null, 
 hostStartTime?: number | null, 
-exitCode?: number | null, startedMs: number, finishedMs?: number | null, cols: number, rows: number, };
+exitCode?: number | null, startedMs: number, finishedMs?: number | null, cols: number, rows: number, 
+queue?: JobQueue | null, };
 
 export type ProcOutputChunk = { dataB64: string, nextOffset: number, record: ProcRecord, };
+
+export type Holder = { pid: number, startTime?: number | null, };
+
+export type RequestKind = "job" | "foreground";
+
+export type ResourceRequest = { id: string, kind: RequestKind, 
+needs: { [key in string]: number }, priority: Priority, enqueuedMs: number, 
+grantedMs?: number | null, 
+manual: boolean, holder: Holder, 
+command: string, workspace?: string | null, sessionId?: string | null, };
+
+export type WaitReason = "busy" | "reserved";
+
+export type WaitOn = { resource: string, reason: WaitReason, 
+by: Array<string>, };
+
+export type QueuedRequest = { 
+position: number, request: ResourceRequest, waitOn: Array<WaitOn>, };
+
+export type ResourceView = { name: string, capacity: number, inUse: number, 
+holders: Array<string>, 
+waiters: Array<string>, };
+
+export type ResourceSnapshot = { nowMs: number, resources: Array<ResourceView>, 
+holders: Array<ResourceRequest>, queue: Array<QueuedRequest>, };
+
+export type MoveTarget = { "index": number } | { "before": string };
 
 export type HostFeatures = { 
 terminal: boolean, 
