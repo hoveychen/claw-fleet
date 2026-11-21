@@ -15,7 +15,9 @@
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 12px 12px calc(16px + env(safe-area-inset-bottom));
+  /* The decision drawer's collapsed bar floats over this page; --peek-inset
+     (set by DecisionDrawer) keeps the last row's buttons scrollable above it. */
+  padding: 12px 12px max(calc(16px + env(safe-area-inset-bottom)), var(--peek-inset, 0px));
   display: flex;
   flex-direction: column;
   gap: 12px;
