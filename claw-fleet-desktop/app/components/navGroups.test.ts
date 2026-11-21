@@ -55,7 +55,7 @@ describe("nav sections", () => {
   it("skips pages this host does not have", () => {
     const avail = { terminal: false, mobile: false, lobsters: false };
     expect(navSectionTarget("projects", { projects: "terminal" }, avail)).toBe("projects");
-    expect(navSectionTabs("projects", avail)).toEqual(["projects"]);
+    expect(navSectionTabs("projects", avail)).toEqual(["projects", "resources"]);
   });
 
   it("folds plugins into the Skills segment and never offers the lobster fleet or global memory", () => {

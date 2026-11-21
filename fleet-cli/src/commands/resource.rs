@@ -73,5 +73,21 @@ pub(crate) fn cmd_resource(action: ResourceCommands) {
             rq::set_capacity(&name, capacity).unwrap_or_else(|e| fail(e));
             println!("ok: {name} now has capacity {capacity}.");
         }
+        ResourceCommands::Kick { id } => {
+            let snap = rq::kick(&id).unwrap_or_else(|e| fail(e));
+            let granted: Vec<&str> = snap.holders.iter().map(|h| h.id.as_str()).collect();
+            if granted.is_empty() {
+                println!("ok: {id} was stopped and its resources released.");
+            } else {
+                println!(
+                    "ok: {id} was stopped and its resources released; now holding: {}.",
+                    granted.join(", ")
+                );
+            }
+        }
+        ResourceCommands::Rm { name } => {
+            rq::remove_resource(&name).unwrap_or_else(|e| fail(e));
+            println!("ok: resource {name} removed.");
+        }
     }
 }

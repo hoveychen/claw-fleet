@@ -75,6 +75,7 @@ function tabLabel(t: TFunction, view: ViewMode): string {
     case "artifacts": return t("nav_tab_artifacts", "产出");
     case "projects": return t("nav_tab_projects", "项目");
     case "terminal": return t("nav_tab_terminal", "终端");
+    case "resources": return t("nav_tab_resources", "资源");
     case "memory": return t("nav_tab_memory", "记忆");
     case "audit": return t("nav_tab_audit", "审计");
     case "report": return t("nav_tab_report", "日报");

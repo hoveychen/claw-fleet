@@ -759,6 +759,23 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { ws: q(a.workspace), root: q(a.root), rel: q(a.relSuffix) },
   }),
 
+  // The resource panel. Every write answers with the table afterwards; the
+  // bodies are the `routes_resource.rs` request structs (camelCase).
+  resource_snapshot: () => ({ method: "GET", path: "/resources" }),
+  resource_move: (a) => ({
+    method: "POST",
+    path: "/resources/move",
+    body: { id: a.id, target: a.target },
+  }),
+  resource_cancel: (a) => ({ method: "POST", path: "/resources/cancel", body: { id: a.id } }),
+  resource_set_capacity: (a) => ({
+    method: "POST",
+    path: "/resources/capacity",
+    body: { name: a.name, capacity: a.capacity },
+  }),
+  resource_kick: (a) => ({ method: "POST", path: "/resources/kick", body: { id: a.id } }),
+  resource_remove: (a) => ({ method: "POST", path: "/resources/remove", body: { name: a.name } }),
+
   read_explorer_bytes: (a) => ({
     method: "GET",
     path: "/explorer_bytes",

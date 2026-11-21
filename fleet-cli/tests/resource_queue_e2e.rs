@@ -654,3 +654,56 @@ fn a_job_queues_runs_times_out_and_is_reaped() {
     unsafe { libc::kill(-command_group, libc::SIGKILL) };
     assert!(!left, "the dead host's command outlived its grant");
 }
+
+/// `fleet resource kick` evicts a holder of either kind and the next waiter
+/// runs; `fleet resource rm` deletes only an idle resource.
+#[test]
+fn kick_evicts_foreground_and_job_holders_and_rm_removes_idle_resources() {
+    let home = short_home();
+    let dir = home.path();
+
+    // A foreground holder that never releases on its own.
+    let mut fg = hold(dir, &["a"], "never");
+    let fg_id = snapshot(dir).holders[0].id.clone();
+    let mut next = run_under(dir, &["a"], &[], "touch \"$D/next-ran\"").spawn().unwrap();
+    wait_until("the next request to queue", Duration::from_secs(20), || snapshot(dir).queue.len() == 1);
+
+    let out = fleet(dir).args(["resource", "kick", &fg_id]).output().unwrap();
+    assert!(out.status.success(), "kick failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("stopped"));
+    // SIGTERM is forwarded to the command, which dies of it.
+    assert_eq!(wait_exit(&mut fg, "the kicked holder", Duration::from_secs(10)), 128 + libc::SIGTERM);
+    assert_eq!(wait_exit(&mut next, "the next request", Duration::from_secs(20)), 0);
+    assert!(dir.join("next-ran").exists());
+
+    // A job holder: its command group is stopped and the grant goes.
+    let held = job_id(&fleet(dir).args(["job", "run", "--need", "a", "sleep 300"]).output().unwrap());
+    wait_until("the job to hold a", Duration::from_secs(20), || {
+        snapshot(dir).holders.iter().any(|h| h.id == held)
+    });
+    let out = fleet(dir).args(["resource", "kick", &held]).output().unwrap();
+    assert!(out.status.success(), "kick failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(snapshot(dir).holders.is_empty(), "kick returns once the grant is gone");
+    let report = job(dir, &["wait", &held, "--timeout", "30"]);
+    assert!(!report.contains("exited 0"), "the job was stopped, not finished: {report}");
+
+    // Kicking a queued request is refused; cancel is the tool for that.
+    let mut blocker = hold(dir, &["a"], "release");
+    let mut waiter = run_under(dir, &["a"], &[], "true").spawn().unwrap();
+    wait_until("the waiter to queue", Duration::from_secs(20), || snapshot(dir).queue.len() == 1);
+    let queued = snapshot(dir).queue[0].request.id.clone();
+    let out = fleet(dir).args(["resource", "kick", &queued]).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cancel it instead"));
+
+    // rm: refused while in use, fine once idle.
+    let out = fleet(dir).args(["resource", "rm", "a"]).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("only an idle resource"));
+    touch(dir, "release");
+    assert_eq!(wait_exit(&mut blocker, "the blocker", Duration::from_secs(20)), 0);
+    assert_eq!(wait_exit(&mut waiter, "the waiter", Duration::from_secs(20)), 0);
+    let out = fleet(dir).args(["resource", "rm", "a"]).output().unwrap();
+    assert!(out.status.success(), "rm failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(snapshot(dir).resources.is_empty());
+}

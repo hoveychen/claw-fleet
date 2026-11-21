@@ -75,6 +75,7 @@ mod routes_mobile;
 mod routes_notes;
 mod routes_plan_approval;
 mod routes_proc;
+mod routes_resource;
 mod routes_schedule;
 mod routes_session_state;
 mod routes_settings;
@@ -99,6 +100,7 @@ use routes_mobile::*;
 use routes_notes::*;
 use routes_plan_approval::*;
 use routes_proc::*;
+use routes_resource::*;
 use routes_schedule::*;
 use routes_session_state::*;
 use routes_settings::*;
@@ -1939,6 +1941,26 @@ fn handle_request(
 
             crate::routes::PROC_CLEAR if request.method() == &tiny_http::Method::Post => {
                 route_proc_clear(ctx, request, &query, json_header, path)
+            }
+
+            // ── Resource queue (machine-global locks and their queue) ────────
+            crate::routes::RESOURCES => route_resources(request, json_header),
+            crate::routes::RESOURCES_MOVE if request.method() == &tiny_http::Method::Post => {
+                route_resources_move(request, json_header)
+            }
+            crate::routes::RESOURCES_CANCEL if request.method() == &tiny_http::Method::Post => {
+                route_resources_cancel(request, json_header)
+            }
+            crate::routes::RESOURCES_CAPACITY
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                route_resources_capacity(request, json_header)
+            }
+            crate::routes::RESOURCES_KICK if request.method() == &tiny_http::Method::Post => {
+                route_resources_kick(request, json_header)
+            }
+            crate::routes::RESOURCES_REMOVE if request.method() == &tiny_http::Method::Post => {
+                route_resources_remove(request, json_header)
             }
 
             // ── Interaction mode endpoints ───────────────────────────────────
