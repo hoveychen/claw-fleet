@@ -97,8 +97,10 @@ function seedHistory(s: Omit<MockState, "history">): ResourceEvent[] {
 /** `read_history_at`: newest first, filtered, one page. */
 function readHistory(s: MockState, q: HistoryQuery) {
   const limit = Math.min(Math.max(q.limit ?? 200, 1), 2000);
+  // Chronological, then newest first: ties keep append order reversed, as core does.
   const all = [...s.history]
-    .sort((a, b) => b.tsMs - a.tsMs)
+    .sort((a, b) => a.tsMs - b.tsMs)
+    .reverse()
     .filter(
       (e) =>
         (q.beforeMs == null || e.tsMs < q.beforeMs) &&

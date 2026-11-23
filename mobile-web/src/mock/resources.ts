@@ -187,7 +187,8 @@ const history: ResourceEvent[] = seedHistory();
 export function mockResourceHistory(q: HistoryQuery): ResourceHistory {
   const limit = Math.min(Math.max(q.limit ?? 200, 1), 2000);
   const all = [...history]
-    .sort((a, b) => b.tsMs - a.tsMs)
+    .sort((a, b) => a.tsMs - b.tsMs)
+    .reverse()
     .filter(
       (e) =>
         (q.beforeMs == null || e.tsMs < q.beforeMs) &&

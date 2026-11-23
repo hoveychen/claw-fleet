@@ -1177,7 +1177,7 @@ const DICT: Record<string, string> = {
   "被踢": "Kicked",
   "等待超时": "Timed out",
   "放弃排队": "Gave up",
-  "进程消失回收": "Reaped",
+  "已回收": "Reaped",
   "容量变更": "Capacity",
   "资源删除": "Removed",
   "{0} 容量 {1} → {2}": "{0} capacity {1} → {2}",

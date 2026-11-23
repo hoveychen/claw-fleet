@@ -168,7 +168,7 @@ export function kindLabel(kind: ResourceEventKind, t: TFunction): string {
     case "aborted":
       return t("resources.ev_aborted", "放弃排队");
     case "reaped":
-      return t("resources.ev_reaped", "进程消失回收");
+      return t("resources.ev_reaped", "已回收");
     case "capacity_set":
       return t("resources.ev_capacity_set", "容量变更");
     case "resource_removed":
@@ -187,7 +187,11 @@ function EventRow({ e }: { e: ResourceEvent }) {
       <span className={styles.when} title={new Date(e.tsMs).toLocaleString()}>
         {fmtWhen(e.tsMs)}
       </span>
-      <span className={styles.kind} data-tone={TONE[e.kind] ?? "neutral"}>
+      <span
+        className={styles.kind}
+        data-tone={TONE[e.kind] ?? "neutral"}
+        title={e.kind === "reaped" ? t("resources.ev_reaped_hint", "持有者进程已消失，资源被自动收回") : undefined}
+      >
         {kindLabel(e.kind, t)}
       </span>
       <div className={styles.main}>

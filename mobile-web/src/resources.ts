@@ -123,7 +123,7 @@ const KIND: Record<ResourceEventKind, [string, EventTone]> = {
   cancelled: ["已取消", "warn"],
   timed_out: ["等待超时", "warn"],
   aborted: ["放弃排队", "warn"],
-  reaped: ["进程消失回收", "bad"],
+  reaped: ["已回收", "bad"],
   capacity_set: ["容量变更", "neutral"],
   resource_removed: ["资源删除", "neutral"],
 };
