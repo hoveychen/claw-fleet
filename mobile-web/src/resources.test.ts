@@ -135,6 +135,28 @@ describe("labels", () => {
     const gone = queued(5, req("z", { gpu: 1 }), [{ resource: "gpu", reason: "busy", by: ["vanished"] }]);
     expect(waitLines(gone, SNAP)[0]).toContain("vanished");
   });
+
+  it("reads a session lease by its note, never as an incognito command", () => {
+    const lease: ResourceRequest = { ...req("l1", { board: 1 }, ""), kind: "lease", note: "flash   firmware", sessionId: "5d2e8f14-aaaa" };
+    expect(commandLabel(lease)).toContain("flash firmware");
+    expect(commandLabel(lease)).not.toBe(commandLabel(req("x", {}, "")));
+    const bare = commandLabel({ ...lease, note: null });
+    expect(bare).not.toBe("");
+    expect(bare).not.toBe(commandLabel(req("x", {}, "")));
+  });
+
+  it("says a not-yet-due lease waits for its time once, not once per resource", () => {
+    const now = new Date(2026, 10, 23, 15, 0, 0).getTime();
+    const later = new Date(2026, 10, 23, 15, 40, 0).getTime();
+    const lease: ResourceRequest = { ...req("l2", { board: 1, db: 1 }, ""), kind: "lease", afterMs: later };
+    const q = queued(1, lease, [
+      { resource: "board", reason: "after", by: [] },
+      { resource: "db", reason: "after", by: [] },
+    ]);
+    const lines = waitLines(q, { ...SNAP, nowMs: now });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("15:40");
+  });
 });
 
 describe("history rows", () => {
@@ -162,10 +184,29 @@ describe("history rows", () => {
   });
 
   it("gives every kind a label and a tone", () => {
-    for (const k of ["enqueued", "granted", "released", "kicked", "cancelled", "timed_out", "aborted", "reaped", "capacity_set", "resource_removed"] as const) {
+    for (const k of ["enqueued", "granted", "released", "kicked", "cancelled", "timed_out", "aborted", "reaped", "transferred", "capacity_set", "resource_removed"] as const) {
       expect(eventKind(k).label).not.toBe("");
+      expect(eventKind(k).label).not.toBe(k);
     }
     expect(eventKind("kicked").tone).toBe("bad");
+  });
+
+  it("titles a lease event by its note and shows which sessions it moved between", () => {
+    const moved = {
+      tsMs: 0,
+      kind: "transferred",
+      requestId: "l1",
+      requestKind: "lease",
+      needs: { board: 1 },
+      note: "flash firmware",
+      sessionId: "1f8a6c3d-92e4",
+      fromSessionId: "7c41d9e2-b03a",
+    } as ResourceEvent;
+    expect(eventTitle(moved)).toContain("flash firmware");
+    const d = eventDetails(moved);
+    expect(d).toContain("7c41d9e2");
+    expect(d).toContain("1f8a6c3d");
+    expect(eventTitle({ ...moved, note: null })).not.toBe("l1");
   });
 
   it("shows only the time for today and the date otherwise", () => {

@@ -44,6 +44,7 @@ export const FLEET_CONTROL_TOOLS = [
   "history",
   "job",
   "task",
+  "resource",
 ] as const;
 
 export type FleetTool = (typeof FLEET_CONTROL_TOOLS)[number];
@@ -88,6 +89,7 @@ export const FLEET_TOOL_LABEL_KEYS: Record<string, string> = {
   history: "detail.fleet_tool.history",
   job: "detail.fleet_tool.job",
   task: "detail.fleet_tool.task",
+  resource: "detail.fleet_tool.resource",
   set_session_title: "detail.fleet_tool.set_session_title",
   image: "detail.fleet_tool.image",
   image_edit: "detail.fleet_tool.image_edit",
@@ -432,6 +434,7 @@ const PROSE_TOOL_MUTATES: Partial<Record<FleetTool, readonly string[]>> = {
   inspect: [],
   history: [],
   job: ["stop"],
+  resource: ["take", "queue", "release", "unqueue"],
   task: ["set", "split"],
   notes: ["write", "edit", "append"],
   artifact: ["add", "delete"],

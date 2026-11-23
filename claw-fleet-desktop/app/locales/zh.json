@@ -32,9 +32,14 @@
       "notes": "笔记",
       "history": "历史",
       "job": "作业",
-      "task": "任务"
+      "task": "任务",
+      "resource": "租约"
     },
     "param": {
+      "need": "资源",
+      "after": "不早于",
+      "priority": "优先级",
+      "max_wait": "最长等待",
       "plan_id": "步骤清单",
       "plan": "步骤清单",
       "task": "步骤",
@@ -125,6 +130,9 @@
       "open_resources": "在资源页查看"
     },
     "param_for": {
+      "resource": {
+        "note": "用来做什么"
+      },
       "handoff": {
         "note": "交接便条"
       },
@@ -242,6 +250,14 @@
         "set": "设定任务目标",
         "get": "查看任务画像",
         "split": "拆出新任务 {{title}}"
+      },
+      "resource": {
+        "take": "拿租约",
+        "queue": "排队等租约",
+        "release": "放租约",
+        "unqueue": "退出租约队列",
+        "mine": "我的租约",
+        "ls": "资源表"
       }
     },
     "rec": {
@@ -1993,6 +2009,7 @@
       "notes": "笔记",
       "history": "历史",
       "job": "作业",
+      "resource": "资源租约",
       "image": "生成图片",
       "image_edit": "修改图片",
       "permission_prompt": "权限询问",
@@ -3549,6 +3566,21 @@
     "ev_waited": "等了 {{d}}",
     "ev_held": "持有 {{d}}",
     "ev_exit": "退出码 {{code}}",
-    "dur_ms": "{{ms}}毫秒"
+    "dur_ms": "{{ms}}毫秒",
+    "kind_lease": "租约",
+    "lease_no_note": "（没写用途）",
+    "lease_idle": "会话已无活动 {{d}}，即将自动释放",
+    "lease_idle_hint": "Fleet 看不到这个会话还在干活（没在跑、没挂 watch、没有等答复的卡、没登记接力），一段时间后租约会自动释放",
+    "release_lease": "替放",
+    "release_lease_hint": "替这个会话放掉租约，把资源交给下一个",
+    "release_lease_confirm": "替会话 {{session}} 放掉租约「{{what}}」？资源交给下一个排队的请求；会话本身不会被打断，但它不再持有这些资源。",
+    "after": "{{time}} 之后",
+    "after_hint": "到这个时间之前不会拿到，也不占位，后面已经能开始的请求照常先走",
+    "skips": "已被插空 {{n}} 次",
+    "skips_hint": "它等其他资源时，排在后面的请求先用了它预留的空闲资源；次数用完后不再让",
+    "wait_after": "等 {{res}}：还没到它定的开始时间",
+    "ev_transferred": "转交",
+    "ev_lease": "租约",
+    "ev_reaped_lease_hint": "持有它的会话已结束，租约被自动收回"
   }
 }

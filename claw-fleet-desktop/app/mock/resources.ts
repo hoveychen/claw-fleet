@@ -44,10 +44,12 @@ function ev(kind: ResourceEventKind, r: ResourceRequest, tsMs: number, extra: Pa
     requestKind: r.kind,
     needs: r.needs,
     priority: r.priority,
-    pid: r.holder.pid,
+    // A lease has no holder process; core logs its events without a pid.
+    pid: r.kind === "lease" ? undefined : r.holder.pid,
     sessionId: r.sessionId,
     command: r.command || undefined,
     workspace: r.workspace,
+    note: r.note,
     ...extra,
   };
 }
@@ -85,6 +87,8 @@ function seedHistory(s: Omit<MockState, "history">): ResourceEvent[] {
     ...finished(old("r19c49f3b7", { cargo: 1 }, 30 * min, "cargo build --release", { kind: "foreground" }), 4 * min, 0, "timed_out"),
     ...finished(old("p1a1fb2f0e55", { "e2e-env": 1, "test-db": 1 }, 25 * min, "pnpm e2e --project mobile", { sessionId: "c4f09a12-6e3d-4b8a-9f21-5a0b7d3e8c64" }), 90_000, 7 * min, "reaped"),
     ...finished(old("p1a1fb3aa871", { gpu: 1 }, 18 * min, "python eval.py --suite small"), 40_000, 0, "cancelled"),
+    ...leaseHandedOn(now - 55 * min),
+    ...finished(old("l19c49e8a40", { "esp32-board": 1 }, 34 * min, "", { ...LEASE, sessionId: "e93b1c07-4d2a-4f86-b5e0-8a1c6d2f9b34", note: "bisect the audio driver regression" }), 0, 14 * min, "reaped"),
   ];
   const live: ResourceEvent[] = [];
   for (const g of s.grants) {
@@ -93,6 +97,24 @@ function seedHistory(s: Omit<MockState, "history">): ResourceEvent[] {
   }
   for (const q of s.queue) live.push(ev("enqueued", q, q.enqueuedMs));
   return [...past, ...live].sort((a, b) => a.tsMs - b.tsMs);
+}
+
+/** A session lease (`fleet resource take` / `queue`): no command, no process. */
+const LEASE: Partial<ResourceRequest> = { kind: "lease", holder: { pid: 0 }, command: "" };
+
+/** A lease taken by one session, carried to its successor at a handoff, then
+ *  released by the successor. */
+function leaseHandedOn(t0: number): ResourceEvent[] {
+  const from = "7c41d9e2-b03a-4e5f-8d17-3a9e2c6b0f58";
+  const to = "1f8a6c3d-92e4-4b70-a5d1-c0e7b4f29a63";
+  const r = req("l19c49d7f02", { "esp32-board": 1 }, Date.now() - t0, "", { ...LEASE, sessionId: from, note: "flash v0.9 firmware and run the wake-word e2e" });
+  const lease = (kind: ResourceEventKind, tsMs: number, extra: Partial<ResourceEvent> = {}) => ev(kind, r, tsMs, extra);
+  return [
+    lease("enqueued", t0),
+    lease("granted", t0, { waitedMs: 0 }),
+    lease("transferred", t0 + 9 * 60_000, { sessionId: to, fromSessionId: from }),
+    lease("released", t0 + 16 * 60_000, { sessionId: to, heldMs: 16 * 60_000 }),
+  ];
 }
 
 /** `read_history_at`: newest first, filtered, one page. */
@@ -142,8 +164,16 @@ function seed(): MockState {
   if (empty) return { capacity: {}, grants: [], queue: [], history: [] };
   const now = Date.now();
   const table: Omit<MockState, "history"> = {
-    capacity: { cargo: 2, "test-db": 1, gpu: 1, "e2e-env": 1 },
+    capacity: { cargo: 2, "test-db": 1, gpu: 1, "e2e-env": 1, "esp32-board": 1 },
     grants: [
+      req("l19c4a0b6e1", { "esp32-board": 1 }, 26 * 60_000, "", {
+        ...LEASE,
+        grantedMs: now - 23 * 60_000,
+        sessionId: "5d2e8f14-7a3c-4b09-9e61-2f8c0d4b7a19",
+        workspace: "/Users/demo/workspace/esp-os",
+        note: "flash firmware and run the chat e2e on the board",
+        idleSinceMs: now - 40_000,
+      }),
       req("r19c4a1f2e", { cargo: 1 }, 4 * 60_000, "cargo test -p claw-fleet-core --lib", {
         kind: "foreground",
         grantedMs: now - 3 * 60_000 - 12_000,
@@ -174,6 +204,20 @@ function seed(): MockState {
         kind: "foreground",
         sessionId: "2b7c9e41-5f0d-4c61-9a8e-0d3f6e2a7b10",
       }),
+      req("l19c4a1d3a8", { "esp32-board": 1, "test-db": 1 }, 12 * 60_000, "", {
+        ...LEASE,
+        sessionId: "b26d0f93-5e1a-47c8-9d3b-e4a7f1c08256",
+        workspace: "/Users/demo/workspace/esp-os",
+        note: "OTA update against the staging db",
+        skips: 1,
+      }),
+      req("l19c4a2e9f4", { "esp32-board": 1 }, 3 * 60_000, "", {
+        ...LEASE,
+        sessionId: "4e9c2a71-d6b3-4085-a1f7-93c5e0b8d24f",
+        workspace: "/Users/demo/workspace/esp-os",
+        note: "overnight battery soak",
+        afterMs: now + 35 * 60_000,
+      }),
     ],
   };
   return { ...table, history: seedHistory(table) };
@@ -192,7 +236,13 @@ function plan(s: MockState): { grant: number[]; waits: Map<number, WaitOn[]> } {
   const reserved: Record<string, string[]> = {};
   const grant: number[] = [];
   const waits = new Map<number, WaitOn[]>();
+  const now = Date.now();
   s.queue.forEach((r, i) => {
+    // Not before its --after time: skipped outright, reserving nothing.
+    if (r.afterMs != null && r.afterMs > now) {
+      waits.set(i, Object.keys(r.needs).map((resource) => ({ resource, reason: "after", by: [] })));
+      return;
+    }
     const blockers: WaitOn[] = [];
     for (const [name, units] of Object.entries(r.needs)) {
       const free = (s.capacity[name] ?? 1) - (used[name] ?? 0);
@@ -304,7 +354,12 @@ export function handleResourceIPC(cmd: string, args: Record<string, unknown>): P
         const g = s.grants.find((x) => x.id === id);
         if (!g) throw `no request ${id} holds a resource`;
         const now = Date.now();
-        s.history.push(ev("kicked", g, now, { heldMs: now - (g.grantedMs ?? g.enqueuedMs), exitCode: 143 }));
+        // A lease has no process: kicking it releases it on its session's behalf.
+        s.history.push(
+          g.kind === "lease"
+            ? ev("kicked", g, now, { heldMs: now - (g.grantedMs ?? g.enqueuedMs) })
+            : ev("kicked", g, now, { heldMs: now - (g.grantedMs ?? g.enqueuedMs), exitCode: 143 }),
+        );
         s.grants = s.grants.filter((x) => x.id !== id);
         return snapshot(s);
       });

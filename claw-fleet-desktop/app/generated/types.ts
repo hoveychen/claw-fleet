@@ -657,15 +657,19 @@ export type ProcOutputChunk = { dataB64: string, nextOffset: number, record: Pro
 
 export type Holder = { pid: number, startTime?: number | null, };
 
-export type RequestKind = "job" | "foreground";
+export type RequestKind = "job" | "foreground" | "lease";
 
 export type ResourceRequest = { id: string, kind: RequestKind, 
 needs: { [key in string]: number }, priority: Priority, enqueuedMs: number, 
 grantedMs?: number | null, 
 manual: boolean, holder: Holder, 
-command: string, workspace?: string | null, sessionId?: string | null, };
+command: string, workspace?: string | null, sessionId?: string | null, 
+afterMs?: number | null, 
+note?: string | null, 
+skips?: number, 
+idleSinceMs?: number | null, };
 
-export type WaitReason = "busy" | "reserved";
+export type WaitReason = "busy" | "reserved" | "after";
 
 export type WaitOn = { resource: string, reason: WaitReason, 
 by: Array<string>, };
@@ -682,11 +686,13 @@ holders: Array<ResourceRequest>, queue: Array<QueuedRequest>, };
 
 export type MoveTarget = { "index": number } | { "before": string };
 
-export type ResourceEventKind = "enqueued" | "granted" | "released" | "kicked" | "cancelled" | "timed_out" | "aborted" | "reaped" | "capacity_set" | "resource_removed";
+export type ResourceEventKind = "enqueued" | "granted" | "released" | "kicked" | "cancelled" | "timed_out" | "aborted" | "reaped" | "transferred" | "capacity_set" | "resource_removed";
 
 export type ResourceEvent = { tsMs: number, kind: ResourceEventKind, requestId?: string | null, requestKind?: RequestKind | null, 
 needs?: { [key in string]: number }, priority?: Priority | null, 
 pid?: number | null, sessionId?: string | null, command?: string | null, workspace?: string | null, 
+note?: string | null, 
+fromSessionId?: string | null, 
 waitedMs?: number | null, 
 heldMs?: number | null, 
 exitCode?: number | null, 

@@ -150,6 +150,16 @@ function fleetSummaryLabel(tool: FleetTool, input: Record<string, unknown>): str
       case "stop": return t("停止作业 {0}", id);
       case "list": return t("列出作业");
     }
+  } else if (tool === "resource") {
+    const need = Array.isArray(input.need) ? (input.need as unknown[]).join(", ") : str(input, "need");
+    switch (action) {
+      case "take": return t("拿租约 {0}", need);
+      case "queue": return t("排队等租约 {0}", need);
+      case "release": return t("放租约");
+      case "unqueue": return t("退出租约队列");
+      case "mine": return t("我的租约");
+      case "ls": return t("资源表");
+    }
   } else if (tool === "task") {
     switch (action) {
       case "kickoff": return t("发开工卡 {0}", str(input, "question"));

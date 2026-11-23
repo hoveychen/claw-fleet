@@ -361,6 +361,10 @@ machine-wide, starts it when all are granted, releases them when it ends or \
 its holder dies; `fleet resource ls` shows holders and waiters. **Never \
 hand-roll lock files or ask other sessions by message** — that is how sessions \
 deadlock. A nested request for an undeclared resource is refused.\n\
+- **Across commands/turns** (dev board, device) → `fleet resource take --need \
+board --note … --session <id>` (busy: `queue`, it prints the watch to wait \
+with), then `release --session <id>`; freed when the session ends, kept across \
+handoff.\n\
 - Pick the scheduling relay by *need*: **repeat periodically (cron) → \
 `fleet loop`** (alias `fleet cron`; durable, a fresh session each interval); \
 **fire once later → `fleet schedule`** (`--at`/`--in`); **wait for an event \
@@ -1173,6 +1177,7 @@ mod tests {
                 "declaring every resource",
                 "Never hand-roll lock files",
                 "fleet resource ls",
+                "fleet resource take --need",
             ] {
                 assert!(g.contains(needle), "[{locale}] missing {needle:?}");
             }
@@ -1462,14 +1467,16 @@ mod tests {
         // dsh's ceiling is 65536, but the user-global file is the first one the
         // instruction loader drops when a project's own AGENTS.md is large. Hold
         // the same budget codex uses so Fleet's blocks are never the reason a
-        // repo's instructions get evicted.
+        // repo's instructions get evicted. Raised from 30_000 to 30_500 when
+        // the session-lease line landed with main ~10 bytes under 30_000 (still
+        // below codex's own guard).
         let prd = render_dsh_prd_block("老板", "zh");
         let ix = render_dsh_interaction_block("老板", "zh");
         let wiki = render_dsh_wiki_block("zh");
         let model = render_dsh_model_block("zh");
         let total = prd.len() + ix.len() + wiki.len() + model.len();
         assert!(
-            total < 30_000,
+            total < 30_500,
             "prd+interaction+wiki+model = {total} must stay well under dsh's 64 KiB \
 (prd {}, ix {}, wiki {}, model {})",
             prd.len(),

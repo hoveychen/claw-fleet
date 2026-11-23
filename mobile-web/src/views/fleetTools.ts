@@ -37,6 +37,7 @@ export const FLEET_CONTROL_TOOLS = [
   "history",
   "job",
   "task",
+  "resource",
 ] as const;
 
 export type FleetTool = (typeof FLEET_CONTROL_TOOLS)[number];
@@ -266,6 +267,7 @@ const PROSE_TOOL_MUTATES: Partial<Record<FleetTool, readonly string[]>> = {
   inspect: [],
   history: [],
   job: ["stop"],
+  resource: ["take", "queue", "release", "unqueue"],
   task: ["set", "split"],
   notes: ["write", "edit", "append"],
   artifact: ["add", "delete"],

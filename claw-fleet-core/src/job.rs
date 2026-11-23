@@ -76,7 +76,7 @@ pub fn run(
     let queue = if opts.needs.is_empty() {
         None
     } else {
-        let inherited_from = match resource_queue::check_nested(&opts.needs)? {
+        let inherited_from = match resource_queue::check_nested(&opts.needs, owner)? {
             Nesting::Inherited(outer) => Some(outer),
             Nesting::TopLevel => {
                 resource_queue::check_fits(&opts.needs)?;

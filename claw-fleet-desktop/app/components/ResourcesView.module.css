@@ -245,6 +245,24 @@
   line-height: 15px;
 }
 
+/* A session lease runs no command; it is held across turns, so it reads apart
+   from the one-shot rows. */
+.kind_lease {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/* A lease's note, in place of a command. */
+.note {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .command {
   flex: 1;
   min-width: 0;
@@ -302,6 +320,11 @@
   padding: 0 4px;
   background: var(--color-bg-sunken);
   color: var(--color-text-secondary);
+}
+
+.tag_warn {
+  background: rgba(var(--color-warning-rgb), 0.14);
+  color: var(--color-warning);
 }
 
 .also {
