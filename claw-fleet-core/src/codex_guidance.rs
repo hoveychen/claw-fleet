@@ -354,6 +354,9 @@ the command ends or its holder dies; `fleet resource ls` shows who holds and \
 who waits. **Never hand-roll lock files or message other sessions to ask \
 whether they use it** — that is how sessions deadlock, each believing the \
 other holds it. A nested request for an undeclared resource is refused.\n\
+- **Across commands/turns** (dev board, device) → `fleet resource take --need \
+board --note …` (busy: `queue`, it prints the watch to wait with), then \
+`release`; held per session, freed when it ends, kept across handoff.\n\
 - Pick the scheduling relay by *need*, not by the name: **repeat periodically \
 (cron) → `fleet loop`** (CLI alias `fleet cron`; Fleet-managed, durable, spawns \
 a fresh LOCAL session each interval so local creds are present — don't mistake \
@@ -1085,6 +1088,7 @@ mod tests {
                 "declaring every resource",
                 "Never hand-roll lock files",
                 "fleet resource ls",
+                "fleet resource take --need",
             ] {
                 assert!(g.contains(needle), "[{locale}] missing {needle:?}");
             }
@@ -1303,14 +1307,16 @@ mod tests {
         // AGENTS.md, so 32 KiB is a size guard rather than a hard cut-off.
         // Raised to 33_000 when the wall-clock preflight section landed at
         // ~32.5K (main already sat ~120 bytes under 32_000). Raised to 34_000
-        // when the Fable 5.2 model row landed at 33_083.
+        // when the Fable 5.2 model row landed at 33_083. Raised to 34_500
+        // when the session-lease line (dev boards held across turns) landed
+        // with main already ~120 bytes under 34_000.
         let prd = render_codex_prd_block("老板", "zh");
         let ix = render_codex_interaction_block("老板", "zh");
         let wiki = render_codex_wiki_block("zh");
         let model = render_codex_model_block("zh");
         let total = prd.len() + ix.len() + wiki.len() + model.len();
         assert!(
-            total < 34_000,
+            total < 34_500,
             "prd+interaction+wiki+model = {total} must stay well under 32 KiB \
 (prd {}, ix {}, wiki {}, model {})",
             prd.len(),
