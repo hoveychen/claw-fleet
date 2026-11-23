@@ -166,6 +166,12 @@ pub enum RequestKind {
     Job,
     /// A foreground `fleet resource run`; the holder is that CLI process.
     Foreground,
+    /// A session lease (`fleet resource take` / `queue`, [`lease`]): an agent
+    /// session holds it across commands and turns until it releases it, the
+    /// session ends, or someone releases it on the session's behalf. No
+    /// process holds it — `holder` is unused (pid 0) and `session_id` is the
+    /// owner.
+    Lease,
 }
 
 /// One request for a set of resources — queued, or granted and holding.
@@ -195,7 +201,49 @@ pub struct ResourceRequest {
     pub workspace: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub session_id: Option<String>,
+    /// Not granted before this time (epoch ms), and reserves nothing until
+    /// then, so it never holds up a request behind it that may go now.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub after_ms: Option<u64>,
+    /// What the holder does with it — a lease's description.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub note: Option<String>,
+    /// Times a request behind this one was granted a resource this one had
+    /// reserved (backfill). Only a lease may be passed, at most
+    /// [`LEASE_MAX_SKIPS`] times.
+    #[serde(skip_serializing_if = "is_zero", default)]
+    pub skips: u32,
+    /// Lease only: since when Fleet has found the owning session with nothing
+    /// keeping it going (no process, watch, card, handoff …). The lease is
+    /// dropped once that lasts [`lease::GRACE`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub idle_since_ms: Option<u64>,
 }
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+impl ResourceRequest {
+    pub fn is_lease(&self) -> bool {
+        self.kind == RequestKind::Lease
+    }
+
+    /// How many times a later request may be granted ahead of this one on a
+    /// resource it reserved: a lease waiting for several things lets a silent
+    /// task fill a gap twice, then holds its place (as `board_lock.py` did);
+    /// a command never lets anyone past.
+    fn max_skips(&self) -> u32 {
+        if self.is_lease() { LEASE_MAX_SKIPS } else { 0 }
+    }
+
+    fn not_yet(&self, now_ms: u64) -> bool {
+        self.after_ms.is_some_and(|t| t > now_ms)
+    }
+}
+
+/// See [`ResourceRequest::max_skips`].
+pub const LEASE_MAX_SKIPS: u32 = 2;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
@@ -206,6 +254,8 @@ pub enum WaitReason {
     /// Free, but promised to requests further ahead in the queue: `by` lists
     /// them.
     Reserved,
+    /// The request's own `after_ms` has not come yet; `by` is empty.
+    After,
 }
 
 /// Why a queued request is not running yet, for one of its resources.
@@ -370,6 +420,7 @@ pub fn describe_wait(wait_on: &[WaitOn]) -> String {
             match w.reason {
                 WaitReason::Busy => format!("{} (held by {who})", w.resource),
                 WaitReason::Reserved => format!("{} (reserved for {who}, ahead in the queue)", w.resource),
+                WaitReason::After => format!("{} (not before its --after time)", w.resource),
             }
         })
         .collect::<Vec<_>>()
@@ -403,6 +454,27 @@ struct State {
     /// records it as kicked rather than released. Pruned with the grant.
     #[serde(skip_serializing_if = "BTreeSet::is_empty")]
     kicking: BTreeSet<String>,
+    /// When the sessions behind leases were last looked up ([`lease`]): the
+    /// lookup reads several stores, so the processes sharing this file take
+    /// turns at it rather than each doing it on every poll.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    leases_checked_ms: u64,
+}
+
+fn is_zero_u64(n: &u64) -> bool {
+    *n == 0
+}
+
+/// The outcome of [`State::plan`].
+#[derive(Debug, Default)]
+struct Plan {
+    /// Queue indexes granted now, in queue order.
+    grant: Vec<usize>,
+    /// What each other queued request waits on (`by` of `Busy` left empty).
+    waits: Vec<(usize, Vec<WaitOn>)>,
+    /// Queue index → how many requests granted in this pass took a resource
+    /// it had reserved ([`ResourceRequest::skips`]).
+    passed: BTreeMap<usize, u32>,
 }
 
 /// What one scheduling pass did.
@@ -431,60 +503,104 @@ impl State {
     /// The scheduling rule: which queued requests (by index) are granted now,
     /// and what each of the others is waiting on. `by` of a `Busy` entry is
     /// left empty here — [`State::snapshot`] fills in the holders.
-    fn plan(&self) -> (Vec<usize>, Vec<(usize, Vec<WaitOn>)>) {
+    ///
+    /// A request whose `after_ms` has not come is skipped outright: it is not
+    /// granted and reserves nothing. A free resource reserved by requests
+    /// further ahead may still go to a later request when every one of those
+    /// reservers has skips to spare ([`ResourceRequest::max_skips`]); each of
+    /// them is then charged one skip.
+    fn plan(&self, now_ms: u64) -> Plan {
         let mut used = self.in_use();
-        let mut reserved: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        let mut grant = Vec::new();
-        let mut waits = Vec::new();
+        // Resource → queue indexes of the requests that reserved it.
+        let mut reserved: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+        let mut out = Plan::default();
         for (i, req) in self.queue.iter().enumerate() {
-            let mut blockers = Vec::new();
+            if req.not_yet(now_ms) {
+                let blockers = req
+                    .needs
+                    .keys()
+                    .map(|name| WaitOn {
+                        resource: name.clone(),
+                        reason: WaitReason::After,
+                        by: Vec::new(),
+                    })
+                    .collect();
+                out.waits.push((i, blockers));
+                continue;
+            }
+            let mut busy = Vec::new();
+            let mut held_back: Vec<(&str, &Vec<usize>)> = Vec::new();
             for (name, &n) in &req.needs {
                 let free = self
                     .capacity(name)
                     .saturating_sub(used.get(name).copied().unwrap_or(0));
                 if free < n {
-                    blockers.push(WaitOn {
-                        resource: name.clone(),
-                        reason: WaitReason::Busy,
-                        by: Vec::new(),
-                    });
-                } else if let Some(ahead) = reserved.get(name) {
-                    blockers.push(WaitOn {
-                        resource: name.clone(),
-                        reason: WaitReason::Reserved,
-                        by: ahead.clone(),
-                    });
+                    busy.push(name.as_str());
+                } else if let Some(ahead) = reserved.get(name.as_str()) {
+                    held_back.push((name.as_str(), ahead));
                 }
             }
-            if blockers.is_empty() {
+            let spare = |j: usize| {
+                let r = &self.queue[j];
+                r.skips + out.passed.get(&j).copied().unwrap_or(0) < r.max_skips()
+            };
+            let passable = held_back.iter().all(|(_, ahead)| ahead.iter().all(|&j| spare(j)));
+            if busy.is_empty() && passable {
                 for (name, &n) in &req.needs {
                     *used.entry(name.clone()).or_insert(0) += n;
                 }
-                grant.push(i);
-            } else {
-                for name in req.needs.keys() {
-                    reserved.entry(name.clone()).or_default().push(req.id.clone());
+                let passed: BTreeSet<usize> =
+                    held_back.iter().flat_map(|(_, ahead)| ahead.iter().copied()).collect();
+                for j in passed {
+                    *out.passed.entry(j).or_insert(0) += 1;
                 }
-                waits.push((i, blockers));
+                out.grant.push(i);
+            } else {
+                let mut blockers: Vec<WaitOn> = busy
+                    .iter()
+                    .map(|name| WaitOn {
+                        resource: name.to_string(),
+                        reason: WaitReason::Busy,
+                        by: Vec::new(),
+                    })
+                    .collect();
+                blockers.extend(held_back.iter().map(|(name, ahead)| WaitOn {
+                    resource: name.to_string(),
+                    reason: WaitReason::Reserved,
+                    by: ahead.iter().map(|&j| self.queue[j].id.clone()).collect(),
+                }));
+                blockers.sort_by(|a, b| a.resource.cmp(&b.resource));
+                for name in req.needs.keys() {
+                    reserved.entry(name.as_str()).or_default().push(i);
+                }
+                out.waits.push((i, blockers));
             }
         }
-        (grant, waits)
+        out
     }
 
     /// One pass: drop requests whose process is gone, then grant whatever the
     /// rule allows. Idempotent — a second pass over the result changes nothing.
+    ///
+    /// `alive` judges the process behind a command's request. A lease has no
+    /// process and is never dropped here: it lapses with its session
+    /// ([`lease`]), before the pass runs.
     fn schedule(&mut self, alive: &dyn Fn(&Holder) -> bool, now_ms: u64) -> Pass {
         let mut pass = Pass::default();
         for list in [&mut self.grants, &mut self.queue] {
             list.retain(|r| {
-                let keep = alive(&r.holder);
+                let keep = r.is_lease() || alive(&r.holder);
                 if !keep {
                     pass.reaped.push(r.id.clone());
                 }
                 keep
             });
         }
-        let (grant, _) = self.plan();
+        let plan = self.plan(now_ms);
+        for (&j, &n) in &plan.passed {
+            self.queue[j].skips += n;
+        }
+        let grant = plan.grant;
         // Highest index first, so earlier indexes stay valid while removing.
         let mut taken: Vec<ResourceRequest> =
             grant.iter().rev().map(|&i| self.queue.remove(i)).collect();
@@ -676,7 +792,7 @@ impl State {
                 .map(|g| g.id.clone())
                 .collect()
         };
-        let (_, waits) = self.plan();
+        let waits = self.plan(now_ms).waits;
         let mut wait_on: BTreeMap<usize, Vec<WaitOn>> = waits.into_iter().collect();
         let queue = self
             .queue
@@ -812,6 +928,10 @@ fn transact<R>(path: &Path, f: impl FnOnce(&mut State) -> R) -> Result<R, String
 
 /// [`transact`], telling the history why a request it removes left.
 fn transact_as<R>(path: &Path, cause: Cause, f: impl FnOnce(&mut State) -> R) -> Result<R, String> {
+    // Who stands behind each lease is looked up before the lock is taken: it
+    // reads other stores (processes, watches, cards, handoffs) and must not
+    // stall the queue. Most calls skip it ([`lease::facts_due`]).
+    let facts = lease::facts_due(path);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     }
@@ -828,6 +948,11 @@ fn transact_as<R>(path: &Path, cause: Cause, f: impl FnOnce(&mut State) -> R) ->
         .map_err(|e| format!("lock {}: {e}", lock_path.display()))?;
     let mut state = load(path)?;
     let before = state.clone();
+    let now = now_ms();
+    // Leases first: one handed on with its session's relay moves to the
+    // successor, one whose session has ended for good is dropped, so `f`'s
+    // pass already hands its resources on.
+    let lapsed = lease::settle(&mut state, facts.as_ref(), now, lease::grace_ms());
     let out = f(&mut state);
     // Whatever `f` did — a pass that reaped a dead holder, an admin removal —
     // a command left running by a dead holder dies before the new state is
@@ -839,7 +964,10 @@ fn transact_as<R>(path: &Path, cause: Cause, f: impl FnOnce(&mut State) -> R) ->
     state.kicking.retain(|id| held.contains(id));
     let mut events = Vec::new();
     if state != before {
-        events = history::events_between(&before, &state, &cause, now_ms(), &holder_alive);
+        let alive = |r: &ResourceRequest| {
+            if r.is_lease() { !lapsed.contains(&r.id) } else { r.holder.is_alive() }
+        };
+        events = history::events_between(&before, &state, &cause, now, &alive);
         let json = serde_json::to_vec_pretty(&state).map_err(|e| e.to_string())?;
         crate::atomic_json::write_atomic(path, &json)
             .map_err(|e| format!("write {}: {e}", path.display()))?;
