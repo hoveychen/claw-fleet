@@ -102,6 +102,34 @@ pub(crate) fn route_proc_run(
     }
 }
 
+/// `GET /proc_get?id=` — one proc/job record without its output. The job
+/// card polls this for a job the resource queue no longer places (no `need`,
+/// or exited); `/proc_output` would ship up to 256 KiB of log tail each time.
+pub(crate) fn route_proc_get(
+    ctx: &ServeCtx,
+    request: tiny_http::Request,
+    query: &std::collections::HashMap<String, String>,
+    json_header: tiny_http::Header,
+    path: &str,
+) {
+    let id = query.get("id").map(|s| s.as_str()).unwrap_or("");
+    match crate::proc_runner::get_proc(id) {
+        Ok(rec) => {
+            let body = serde_json::to_string(&rec).unwrap_or_default();
+            let _ =
+                request.respond(tiny_http::Response::from_string(body).with_header(json_header));
+        }
+        Err(e) => {
+            let body = serde_json::json!({"error": e}).to_string();
+            let _ = request.respond(
+                tiny_http::Response::from_string(body)
+                    .with_status_code(404)
+                    .with_header(json_header),
+            );
+        }
+    }
+}
+
 pub(crate) fn route_proc_output(
     ctx: &ServeCtx,
     request: tiny_http::Request,

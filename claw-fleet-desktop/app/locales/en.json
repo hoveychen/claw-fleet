@@ -104,6 +104,26 @@
       "new_folder": "New folder",
       "description": "Folder description"
     },
+    "job_card": {
+      "loading": "Loading status…",
+      "starting": "Submitting…",
+      "queued_pos": "Queued #{{pos}} of {{len}}",
+      "queued": "Queued",
+      "waited": "waited {{d}}",
+      "holding": "Holding · running",
+      "running": "Running",
+      "ran": "ran {{d}}",
+      "queued_first": "queued {{d}} first",
+      "exited": "Ended · exit {{code}}",
+      "exited_unknown": "Ended",
+      "took": "took {{d}}",
+      "queued_for": "queued {{d}}",
+      "end_timeout": "Queue timeout · never ran",
+      "end_cancelled": "Cancelled · never ran",
+      "end_rejected": "Request refused · never ran",
+      "gone": "Ended",
+      "open_resources": "Open in Resources"
+    },
     "param_for": {
       "handoff": {
         "note": "Briefing"

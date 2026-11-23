@@ -275,6 +275,8 @@ pub const PLUGINS_MARKETPLACES_REMOVE: &str = "/plugins/marketplaces/remove";
 pub const PLUGINS_SET_ENABLED: &str = "/plugins/set_enabled";
 pub const PLUGINS_UNINSTALL: &str = "/plugins/uninstall";
 pub const PROC_CLEAR: &str = "/proc_clear";
+/// One proc/job record by id, without its output (the job card's status poll).
+pub const PROC_GET: &str = "/proc_get";
 pub const PROC_INPUT: &str = "/proc_input";
 pub const PROC_KILL: &str = "/proc_kill";
 pub const PROC_OUTPUT: &str = "/proc_output";

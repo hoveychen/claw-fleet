@@ -39,6 +39,8 @@ import {
 import { EmptyState } from "./EmptyState";
 import { isFleetTool, isImageCall, parseImageProvenance } from "./fleetTools";
 import { IngestCard, ingestStepLabel } from "./IngestCard";
+import { JobCard } from "./JobCard";
+import { isJobRunInput, parseJobRunCall } from "../../../shared-ts/jobCard";
 import { fleetSummary } from "./FleetBody";
 import ReactMarkdown from "react-markdown";
 import { mdRemarkPlugins, mdRehypePlugins, normalizeSvgBlankLines } from "../markdown/plugins";
@@ -344,6 +346,8 @@ interface ToolMeta {
    *  the deliverable instead of a bare "产出" (Artifact) chip. */
   ingest?: IngestSummary;
   image?: ImageResultSummary;
+  /** Id of the job a `fleet__job run` started (the result's `_job`). */
+  jobId?: string;
 }
 
 function collectToolMeta(messages: RawMessage[]): Map<string, ToolMeta> {
@@ -359,7 +363,9 @@ function collectToolMeta(messages: RawMessage[]): Map<string, ToolMeta> {
       }
       if (b._ingest) meta.ingest = b._ingest;
       if (b._image) meta.image = b._image;
-      if (meta.digest || meta.isError || meta.thumbs || meta.ingest || meta.image) map.set(b.tool_use_id, meta);
+      if (b._job?.id) meta.jobId = b._job.id;
+      if (meta.digest || meta.isError || meta.thumbs || meta.ingest || meta.image || meta.jobId)
+        map.set(b.tool_use_id, meta);
     }
   }
   return map;
@@ -877,6 +883,7 @@ function ToolStep({
   const background = isBackgroundShell(b);
   const name = b.name ?? "";
   const fleetTool = isFleetTool(name);
+  const jobRun = fleetTool === "job" && isJobRunInput(b.input) ? parseJobRunCall(b.input) : null;
   const summary = meta?.ingest
     ? // For ingestion calls, full identity lives on the card below; the line
       // shows only the action name (the relay strips title/slug, so the old
@@ -936,6 +943,12 @@ function ToolStep({
           **result** of this call, not scaffold records, so they are always visible
           without expanding. */}
       {meta?.ingest && <IngestCard ingest={meta.ingest} client={client} />}
+      {/* A job's live state: in flight → "submitting", started → its place in
+          the queue / exit code. No id and not in flight = an errored run, or a
+          host too old to send `_job`: no card rather than a stuck one. */}
+      {jobRun && (meta?.jobId || (running && !meta?.isError)) && (
+        <JobCard call={jobRun} jobId={meta?.jobId ?? null} client={client} />
+      )}
       {meta?.thumbs && (
         <ThumbRow
           srcs={meta.thumbs}

@@ -1708,6 +1708,7 @@ pub fn run() {
             run_workspace_proc,
             kill_workspace_proc,
             read_workspace_proc_output,
+            get_workspace_proc,
             write_workspace_proc_input,
             resize_workspace_proc,
             clear_workspace_procs,

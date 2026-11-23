@@ -12,6 +12,7 @@ import type {
   ResourceEvent,
   ResourceEventKind,
   ResourceHistory,
+  ProcRecord,
   QueuedRequest,
   ResourceRequest,
   ResourceSnapshot,
@@ -196,4 +197,19 @@ export function mockResourceHistory(q: HistoryQuery): ResourceHistory {
         (!q.requestId || e.requestId === q.requestId),
     );
   return { events: all.slice(0, limit), hasMore: all.length > limit };
+}
+
+/** `proc_get` for the job card: records of jobs the queue no longer places.
+ *  Anything else is "no such proc" — the card then shows a bare "ended". */
+export function mockJobRecord(id: string): ProcRecord {
+  const now = Date.now();
+  const base = { id, workspacePath: "/Users/boss/workspace/api-server", status: "exited" as const, cols: 120, rows: 40 };
+  if (id === "job-e3a1") {
+    return { ...base, command: "cargo test --workspace", exitCode: 0, startedMs: now - 31 * MIN, finishedMs: now - 14 * MIN,
+      queue: { needs: { cargo: 1 }, priority: "normal", grantedMs: now - 29 * MIN } };
+  }
+  if (id === "job-e3a2") {
+    return { ...base, command: "pnpm build", exitCode: 1, startedMs: now - 9 * MIN, finishedMs: now - 8 * MIN - 17_000 };
+  }
+  throw new Error(`no proc ${id}`);
 }

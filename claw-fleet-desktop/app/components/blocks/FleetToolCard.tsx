@@ -15,6 +15,8 @@ import {
   type FleetView,
 } from "./fleetTools";
 import { ArtifactIngestPreview, WikiIngestPreview } from "./IngestPreview";
+import { JobStatusPanel } from "./JobStatusPanel";
+import { isJobRunInput, parseJobRunCall, parseJobRunId } from "../../../../shared-ts/jobCard";
 import styles from "./FleetToolCard.module.css";
 
 /** Fields shown as key/value rows, in this order; anything else falls after.
@@ -433,6 +435,12 @@ export function FleetToolCard({ block, result, isPartial, rail }: Props) {
     [tool, block.input, content, isError],
   );
 
+  const jobRun = useMemo(
+    () => (tool === "job" && isJobRunInput(block.input) ? parseJobRunCall(block.input) : null),
+    [tool, block.input],
+  );
+  const jobId = jobRun && !isError ? parseJobRunId(content) : null;
+
   if (!tool || !view) return null;
 
   const rows = paramRows(view.input);
@@ -466,6 +474,11 @@ export function FleetToolCard({ block, result, isPartial, rail }: Props) {
         <ArtifactIngestPreview artifact={view.result.artifact} />
       )}
       {view.result.kind === "wiki-publish" && <WikiIngestPreview doc={view.result.doc} />}
+
+      {/* A job's state is live (queued / holding / exited) and is what the
+          reader wants from the call, so like an ingest it shows unexpanded.
+          An errored run (no job started) has no strip. */}
+      {jobRun && (!result || jobId) && <JobStatusPanel call={jobRun} jobId={jobId} />}
 
       {open && (
         <div className={styles.body}>

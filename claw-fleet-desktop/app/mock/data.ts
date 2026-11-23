@@ -1234,6 +1234,187 @@ function billingLeg(
 }
 
 export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
+  // The regression-suite task: its `fleet__job run` calls exercise the job card
+  // (one per state — queued / holding / exited / failed / gone).
+  "sess-e2e-main": [
+    {
+      type: "user",
+      uuid: "msg-e2e-prompt",
+      timestamp: new Date(NOW - 13 * MIN).toISOString(),
+      message: { role: "user", content: "Run the v2.4 regression matrix — e2e, benches and the core suites." },
+    },
+    // ── fleet__job run — the job card's states (ids match mock/resources.ts MOCK_JOB_IDS) ──
+    {
+      type: "assistant",
+      uuid: "msg-fleet-job-queued",
+      timestamp: new Date(NOW - 12 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-job-queued",
+            name: "mcp__fleet__fleet__job",
+            input: {"action": "run", "command": "python scripts/bench_vectors.py --full", "need": ["test-db", "gpu"], "note": "全量向量基准，跑完对比上周数字"},
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6600, output_tokens: 60 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-job-queued-r",
+      timestamp: new Date(NOW - 12 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-job-queued",
+            content: "ok: job p1a1fc40ef29 started in /Users/demo/workspace/claude-fleet.\nlog: /Users/demo/.fleet/procs/p1a1fc40ef29.log\nresources: test-db, gpu — the command starts once all of them are granted to this job at the same time; until then its status is `queued` (see `fleet resource ls`).\n",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-job-holding",
+      timestamp: new Date(NOW - 11 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-job-holding",
+            name: "mcp__fleet__fleet__job",
+            input: {"action": "run", "command": "pnpm e2e --project desktop", "need": ["test-db", "e2e-env"], "note": "桌面端 e2e 全套"},
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6600, output_tokens: 60 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-job-holding-r",
+      timestamp: new Date(NOW - 11 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-job-holding",
+            content: "ok: job p1a1fc3d8e44 started in /Users/demo/workspace/claude-fleet.\nlog: /Users/demo/.fleet/procs/p1a1fc3d8e44.log\nresources: test-db, e2e-env — the command starts once all of them are granted to this job at the same time; until then its status is `queued` (see `fleet resource ls`).\n",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-job-exited",
+      timestamp: new Date(NOW - 10 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-job-exited",
+            name: "mcp__fleet__fleet__job",
+            input: {"action": "run", "command": "cargo test -p claw-fleet-core --test resource_queue_e2e", "need": ["cargo"], "note": "资源队列 e2e"},
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6600, output_tokens: 60 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-job-exited-r",
+      timestamp: new Date(NOW - 10 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-job-exited",
+            content: "ok: job p1a1fb07c2d5 started in /Users/demo/workspace/claude-fleet.\nlog: /Users/demo/.fleet/procs/p1a1fb07c2d5.log\nresources: cargo — the command starts once all of them are granted to this job at the same time; until then its status is `queued` (see `fleet resource ls`).\n",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-job-failed",
+      timestamp: new Date(NOW - 9.5 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-job-failed",
+            name: "mcp__fleet__fleet__job",
+            input: {"action": "run", "command": "pnpm build"},
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6600, output_tokens: 60 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-job-failed-r",
+      timestamp: new Date(NOW - 9.5 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-job-failed",
+            content: "ok: job p1a1fb07c9e1 started in /Users/demo/workspace/claude-fleet.\nlog: /Users/demo/.fleet/procs/p1a1fb07c9e1.log\n",
+          },
+        ],
+      },
+    },
+    {
+      type: "assistant",
+      uuid: "msg-fleet-job-gone",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "tool_use",
+            id: "tool-fleet-job-gone",
+            name: "mcp__fleet__fleet__job",
+            input: {"action": "run", "command": "python train.py --epochs 3", "need": ["gpu:1"], "wake": true, "note": "上周的训练任务"},
+          },
+        ],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 6600, output_tokens: 60 },
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-fleet-job-gone-r",
+      timestamp: new Date(NOW - 9 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-fleet-job-gone",
+            content: "ok: job p1a1f9000000 started in /Users/demo/workspace/claude-fleet.\nlog: /Users/demo/.fleet/procs/p1a1f9000000.log\nresources: gpu:1 — the command starts once all of them are granted to this job at the same time; until then its status is `queued` (see `fleet resource ls`).\n",
+          },
+        ],
+      },
+    },
+  ],
   // The three legs of chain-billing, short enough that each one is fully
   // loaded on open — so the task page's "load leg N" control can walk the
   // relay back from leg 3 to leg 1.

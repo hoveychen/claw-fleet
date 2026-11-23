@@ -56,7 +56,7 @@ import {
 
 import scenes from "../../../scripts/site/fixtures/scenes.json";
 import { localizeMock } from "./demoLocale";
-import { mockResourceCancel, mockResourceHistory, mockResourceMove, mockResourceSnapshot } from "./resources";
+import { mockJobRecord, mockResourceCancel, mockResourceHistory, mockResourceMove, mockResourceSnapshot } from "./resources";
 import type { HistoryQuery, MoveTarget } from "../generated/types";
 
 /** Host continuation switches (`resume_settings`); `set_resume_settings` merges into it. */
@@ -264,6 +264,8 @@ export class MockRelayClient extends RelayClient {
         return null;
       case "resource_list":
         return mockResourceSnapshot();
+      case "proc_get":
+        return mockJobRecord(String(params?.id));
       case "resource_move":
         return mockResourceMove(String(params?.id), params?.target as MoveTarget);
       case "resource_cancel":

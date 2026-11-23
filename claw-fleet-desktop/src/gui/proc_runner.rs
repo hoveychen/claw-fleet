@@ -46,6 +46,15 @@ pub(crate) fn kill_workspace_proc(
     state.backend.kill_proc(id, force)
 }
 
+/// One proc/job record without its output (the job card's status poll).
+#[tauri::command(async)]
+pub(crate) fn get_workspace_proc(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::proc_runner::ProcRecord, String> {
+    state.backend.proc_get(id)
+}
+
 #[tauri::command(async)]
 pub(crate) fn read_workspace_proc_output(
     id: String,

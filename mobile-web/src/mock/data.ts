@@ -849,6 +849,14 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
           // comes from `_ingest` (see the matching tool_result) — these two lines exist to make it obvious what breaks without it.
           { type: "tool_use", id: "fi1", name: "mcp__fleet__fleet__artifact", input: { action: "add", path: "/Users/demo/workspace/claw-fleet/.worktrees/q3/out.xlsx" } },
           { type: "tool_use", id: "fi2", name: "mcp__fleet__fleet__wiki", input: { action: "publish", path: "/tmp/index.md" } },
+          // `fleet__job run` as the relay ships it: `command`/`need`/`note` survive the
+          // input whitelist and the job id rides on the result's `_job`. One per state
+          // the job card draws; ids match mock/resources.ts.
+          { type: "tool_use", id: "fj1", name: "mcp__fleet__fleet__job", input: { action: "run", command: "python backfill_embeddings.py --since 2026-11-01", need: ["gpu", "staging-db"], note: "补 11 月的向量" } },
+          { type: "tool_use", id: "fj2", name: "mcp__fleet__fleet__job", input: { action: "run", command: "pnpm test:e2e --project=chromium", need: ["staging-db"], note: "e2e 回归" } },
+          { type: "tool_use", id: "fj3", name: "mcp__fleet__fleet__job", input: { action: "run", command: "cargo test --workspace", need: ["cargo"] } },
+          { type: "tool_use", id: "fj4", name: "mcp__fleet__fleet__job", input: { action: "run", command: "pnpm build" } },
+          { type: "tool_use", id: "fj5", name: "mcp__fleet__fleet__job", input: { action: "run", command: "python train.py --epochs 3", need: ["gpu:1"], note: "上周的训练任务" } },
           { type: "tool_use", id: "fp6", name: "mcp__fleet__fleet__handoff", input: { action: "list" } },
           { type: "tool_use", id: "fp7", name: "mcp__fleet__fleet__loop", input: { action: "list" } },
           { type: "tool_use", id: "fp8", name: "mcp__fleet__fleet__schedule", input: { action: "list" } },
@@ -892,6 +900,11 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
             tool_use_id: "fi2",
             _ingest: { kind: "wiki", slug: "arch/overview", version: "v3", title: "Architecture overview" },
           },
+          { type: "tool_result", tool_use_id: "fj1", _job: { id: "job-b442" } },
+          { type: "tool_result", tool_use_id: "fj2", _job: { id: "job-91c2" } },
+          { type: "tool_result", tool_use_id: "fj3", _job: { id: "job-e3a1" } },
+          { type: "tool_result", tool_use_id: "fj4", _job: { id: "job-e3a2" } },
+          { type: "tool_result", tool_use_id: "fj5", _job: { id: "job-0ld1" } },
           { type: "tool_result", tool_use_id: "fa1", _digest: { answer: "等 max TTL 过完再下线" } },
         ],
       },

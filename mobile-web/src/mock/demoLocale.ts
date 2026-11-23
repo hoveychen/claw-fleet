@@ -39,6 +39,9 @@ const EN: Record<string, string> = {
     "Post a status-page notice: 5-minute read-only window from 02:00 UTC.",
   "这是设计稿和需求文档，按这个改。\n\nContext files:\n- /Users/demo/.fleet/user-attachments/4b7c9e1a2d3f5068/design.png\n- /Users/demo/.fleet/user-attachments/9f3a1c2b7d4e5f60/spec.pdf":
     "Here are the design and the spec. Build it to match.\n\nContext files:\n- /Users/demo/.fleet/user-attachments/4b7c9e1a2d3f5068/design.png\n- /Users/demo/.fleet/user-attachments/9f3a1c2b7d4e5f60/spec.pdf",
+  "补 11 月的向量": "Backfill November's embeddings",
+  "e2e 回归": "e2e regression",
+  "上周的训练任务": "Last week's training run",
   "等 backfill 版镜像上线（运行镜像 Created 从 05:10:08 变化）；触发时抓容器日志确认补了多少条历史花费":
     "Wait for the backfill image to go live (the running image's Created time moves off 05:10:08); then pull the container logs to see how many historical charges were backfilled",
   "双 issuer 补丁跑通了，旧 issuer 什么时候下线？": "The dual-issuer patch works. When do we retire the old issuer?",
