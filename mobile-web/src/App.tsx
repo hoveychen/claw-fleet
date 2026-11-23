@@ -111,6 +111,7 @@ import { TasksView } from "./views/TasksView";
 import { UsageView } from "./views/UsageView";
 import { AttentionView } from "./views/AttentionView";
 import { ResourcesView } from "./views/ResourcesView";
+import { OpenResourcesContext } from "./views/JobCard";
 import { WikiDocView } from "./views/WikiDocView";
 import { fetchWikiDoc } from "./libraryApi";
 import { Presence } from "./Presence";
@@ -747,6 +748,7 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
   const [terminal, setTerminal] = useState<{ workspace: TerminalWorkspace | null } | null>(null);
   const [showAttention, setShowAttention] = useState(false);
   const [showResources, setShowResources] = useState(false);
+  const openResources = useCallback(() => setShowResources(true), []);
   const [showNewSession, setShowNewSession] = useState(false);
   // Which device the new session opens on. null = follow the current scoped device
   // (reset on every sheet open), unless the user explicitly picks a different device
@@ -1542,17 +1544,13 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
         />
       </Presence>
 
-      {showResources && <HistoryLayer onBack={() => setShowResources(false)} />}
-      <Presence when={showResources}>
-        <ResourcesView client={client} onBack={() => setShowResources(false)} />
-      </Presence>
-
       <div className={sheetPeek ? styles.aboveSheet : undefined}>
       {detailStack.map((_, i) => (
         <HistoryLayer key={i} onBack={() => setDetailStack((s) => s.slice(0, i))} />
       ))}
       <Presence when={!!detailSession}>
       {detailSession && (
+        <OpenResourcesContext.Provider value={openResources}>
         <SessionDetailView
           key={sessionDetailKey(detailSession.deviceId, detailSession.id)}
           session={detailSession}
@@ -1582,7 +1580,16 @@ export function App({ makeTransport }: { makeTransport: TransportFactory }) {
             ).length
           }
         />
+        </OpenResourcesContext.Provider>
       )}
+      </Presence>
+
+      {/* After the session detail, not before: a job card inside a session
+          opens this page, so it has to cover the detail it was opened from.
+          (Nothing on the resources page opens a session.) */}
+      {showResources && <HistoryLayer onBack={() => setShowResources(false)} />}
+      <Presence when={showResources}>
+        <ResourcesView client={client} onBack={() => setShowResources(false)} />
       </Presence>
 
       {/* Each document gets a layer, but only render the top one — lower docs don't need

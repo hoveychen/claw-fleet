@@ -15,7 +15,7 @@ import type { PromoScene } from "./promo-scene";
 import { DEMO_BOARD, RELAY_CHAINS, RELAY_PATH_TO_ID, RELAY_SESSIONS } from "./demoData";
 import { RELAY_SCRIPTS } from "./demoScripts";
 import { LIVE_MODE, installLiveProxy, liveInvoke } from "./liveProxy";
-import { handleResourceIPC } from "./resources";
+import { handleResourceIPC, mockJobRecord } from "./resources";
 import {
   mockIngestBatch,
   mockBackfillStart,
@@ -884,6 +884,8 @@ async function handleIPC(
       return null;
     case "kill_workspace_proc":
       return killMockProc(args.id as string);
+    case "get_workspace_proc":
+      return mockJobRecord(String(args.id));
     case "resource_snapshot":
     case "resource_move":
     case "resource_cancel":

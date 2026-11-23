@@ -104,6 +104,26 @@
       "new_folder": "新建目录",
       "description": "目录说明"
     },
+    "job_card": {
+      "loading": "读取状态…",
+      "starting": "提交中…",
+      "queued_pos": "排队第 {{pos}} 位 / 共 {{len}}",
+      "queued": "排队中",
+      "waited": "已等 {{d}}",
+      "holding": "已持有 · 运行中",
+      "running": "运行中",
+      "ran": "已跑 {{d}}",
+      "queued_first": "先排队 {{d}}",
+      "exited": "已结束 · 退出码 {{code}}",
+      "exited_unknown": "已结束",
+      "took": "跑了 {{d}}",
+      "queued_for": "排队 {{d}}",
+      "end_timeout": "排队超时 · 未运行",
+      "end_cancelled": "已取消 · 未运行",
+      "end_rejected": "申请被拒 · 未运行",
+      "gone": "已结束",
+      "open_resources": "在资源页查看"
+    },
     "param_for": {
       "handoff": {
         "note": "交接便条"

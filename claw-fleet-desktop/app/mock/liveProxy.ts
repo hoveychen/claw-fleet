@@ -1247,6 +1247,8 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
     query: { ws: q(a.workspace), session: q(a.sessionId), rel: q(a.relPath) },
   }),
 
+  get_workspace_proc: (a) => ({ method: "GET", path: "/proc_get", query: { id: q(a.id) } }),
+
   read_workspace_proc_output: (a) => ({
     method: "GET",
     path: "/proc_output",

@@ -12,6 +12,7 @@
  */
 import type {
   MoveTarget,
+  ProcRecord,
   QueuedRequest,
   ResourceRequest,
   ResourceSnapshot,
@@ -226,4 +227,48 @@ export function handleResourceIPC(cmd: string, args: Record<string, unknown>): P
     default:
       return undefined;
   }
+}
+
+/** Ids of the `fleet__job run` calls in the mock transcript (`data.ts`) — one
+ *  per state the job card draws. QUEUED / HOLDING are requests seeded above. */
+export const MOCK_JOB_IDS = {
+  queued: "p1a1fc40ef29",
+  holding: "p1a1fc3d8e44",
+  exited: "p1a1fb07c2d5",
+  failed: "p1a1fb07c9e1",
+  gone: "p1a1f9000000",
+} as const;
+
+/**
+ * `get_workspace_proc` for the job card: the record of a job the queue no
+ * longer places. Exited ones answer; anything else is "no such proc", which is
+ * what a cleared record or another machine's job looks like for real.
+ */
+export function mockJobRecord(id: string): Promise<ProcRecord> {
+  const now = Date.now();
+  const base = (extra: Partial<ProcRecord>): ProcRecord => ({
+    id,
+    workspacePath: "/Users/demo/workspace/claude-fleet",
+    command: "",
+    status: "exited",
+    startedMs: now,
+    cols: 120,
+    rows: 40,
+    ...extra,
+  });
+  return later(IPC_DELAY_MS, () => {
+    if (id === MOCK_JOB_IDS.exited) {
+      return base({
+        command: "cargo test -p claw-fleet-core --test resource_queue_e2e",
+        exitCode: 0,
+        startedMs: now - 26 * 60_000,
+        finishedMs: now - 12 * 60_000,
+        queue: { needs: { cargo: 1 }, priority: "normal", grantedMs: now - 24 * 60_000 - 35_000 },
+      });
+    }
+    if (id === MOCK_JOB_IDS.failed) {
+      return base({ command: "pnpm build", exitCode: 1, startedMs: now - 9 * 60_000, finishedMs: now - 8 * 60_000 - 17_000 });
+    }
+    throw `no proc ${id}`;
+  });
 }

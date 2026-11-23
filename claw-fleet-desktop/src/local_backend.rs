@@ -2741,6 +2741,10 @@ impl LocalBackend {
         claw_fleet_core::proc_runner::proc_output(&id, offset)
     }
 
+    pub fn proc_get(&self, id: String) -> Result<claw_fleet_core::proc_runner::ProcRecord, String> {
+        claw_fleet_core::proc_runner::get_proc(&id)
+    }
+
     pub fn proc_input(&self, id: String, data_b64: String) -> Result<(), String> {
         claw_fleet_core::proc_runner::proc_input(&id, &data_b64)
     }

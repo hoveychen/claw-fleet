@@ -1927,6 +1927,8 @@ fn handle_request(
                 route_proc_output(ctx, request, &query, json_header, path)
             }
 
+            crate::routes::PROC_GET => route_proc_get(ctx, request, &query, json_header, path),
+
             crate::routes::PROC_INPUT if request.method() == &tiny_http::Method::Post => {
                 route_proc_input(ctx, request, &query, json_header, path)
             }

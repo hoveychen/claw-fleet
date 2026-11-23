@@ -294,6 +294,10 @@ export interface ContentBlock {
    *  strips, so without this the phone can only say "artifact" (see
    *  `ingest_summary` in mobile_relay.rs). */
   _ingest?: IngestSummary;
+  /** The job a `fleet__job run` result started (`job_run_summary` in
+   *  mobile_relay.rs) — the body is stripped, and the job card needs the id to
+   *  find the job in the resource queue. */
+  _job?: { id: string };
   /** Metadata of a `fleet__image` / `fleet__image_edit` result, recovered by
    *  `image_result_summary` in mobile_relay.rs because the body is stripped. */
   _image?: ImageResultSummary;

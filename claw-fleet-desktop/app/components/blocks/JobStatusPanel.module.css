@@ -1,0 +1,109 @@
+/* Status strip under a `fleet__job run` card. Sits outside the collapsible
+   body (like the ingest preview) so the job's state reads without expanding:
+   requested resources as chips, then a state badge and its clock. */
+.root {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  width: 100%;
+  margin: 4px 0 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-sunken);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--t-aux, var(--font-size-xs));
+  text-align: left;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border);
+}
+
+.needs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.need {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-field);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--t-meta, 10px);
+}
+
+.state {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.badge {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-size: var(--t-meta, 10px);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+
+.badge_queued {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+/* Teal, the Fleet-operation colour, rather than the orange accent: next to
+   the red failure badge the accent read as "something is wrong". */
+.badge_holding {
+  background: color-mix(in srgb, var(--color-teal) 14%, transparent);
+  color: var(--color-teal);
+}
+
+.badge_ok {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.badge_fail {
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+}
+
+.badge_done {
+  background: var(--color-bg-field);
+  color: var(--color-text-secondary);
+}
+
+.clock {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.wait {
+  color: var(--color-text-dim);
+  min-width: 0;
+}
+
+.dim {
+  color: var(--color-text-dim);
+}
+
+.id {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--t-meta, 10px);
+  color: var(--color-text-muted);
+}

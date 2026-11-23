@@ -1559,9 +1559,10 @@ const TAIL_TOOL_INPUT_FIELDS: [&str; 9] = [
 /// its bare tool name ("plan", "notes"), and a run of plan checks reads as a
 /// column of identical rows. String values are capped at
 /// [`ASK_SUMMARY_MAX_CHARS`] — a handoff note or spawn prompt can be many KB.
-const TAIL_FLEET_TOOL_INPUT_FIELDS: [&str; 11] = [
+const TAIL_FLEET_TOOL_INPUT_FIELDS: [&str; 13] = [
     "action", "plan_id", "plan", "task", "id", "slug", "title", "line_no", "note", "prompt",
-    "text",
+    "text", // `fleet__job run`: the job card shows the command and what it queues for.
+    "command", "need",
 ];
 
 /// True for a Fleet control tool's wire name (`mcp__fleet__fleet__plan`) or a
@@ -1683,6 +1684,19 @@ fn image_result_summary(block: &Map<String, Value>) -> Option<Value> {
 /// The two format strings ([`crate::mcp_control`]'s `handle_artifact` /
 /// `handle_wiki`) are specific enough for that to be safe; the cost of a false
 /// positive is one card that resolves to nothing, not a wrong one.
+/// `{id}` of the job a `fleet__job run` result started (`ok: job <id> started
+/// in <dir>.`, `mcp_control::handle_job`). The body is stripped from the tail,
+/// and without the id the phone's job card cannot find the job in the queue.
+fn job_run_summary(block: &Map<String, Value>) -> Option<Value> {
+    let text = tool_result_text(block.get("content")?);
+    let first = text.trim().lines().next()?.trim();
+    let id = first.strip_prefix("ok: job ")?.split_once(" started")?.0;
+    if id.is_empty() || id.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(json!({ "id": id }))
+}
+
 fn ingest_summary(block: &Map<String, Value>) -> Option<Value> {
     let text = tool_result_text(block.get("content")?);
     // Only the first line is the sentence; what follows (where the item was
@@ -1998,6 +2012,9 @@ fn slim_tail_block(block: &Value) -> Value {
             }
             if let Some(ingest) = ingest_summary(obj) {
                 out.insert("_ingest".into(), ingest);
+            }
+            if let Some(job) = job_run_summary(obj) {
+                out.insert("_job".into(), job);
             }
             if let Some(image) = image_result_summary(obj) {
                 out.insert("_image".into(), image);
@@ -2737,6 +2754,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "procs" => serve_procs(params),
         "proc_run" => serve_proc_run(params),
         "proc_output" => serve_proc_output(params),
+        "proc_get" => serve_proc_get(params),
         "proc_input" => serve_proc_input(params),
         "proc_resize" => serve_proc_resize(params),
         "proc_kill" => serve_proc_kill(params),
@@ -4337,6 +4355,17 @@ fn serve_proc_output(params: &Value) -> Result<Value, String> {
     let offset = params.get("offset").and_then(Value::as_u64);
     let chunk = crate::proc_runner::proc_output(id, offset)?;
     serde_json::to_value(chunk).map_err(|e| e.to_string())
+}
+
+/// One proc/job record without its output — the job card's status poll for a
+/// job the resource queue no longer places (see `routes::PROC_GET`).
+fn serve_proc_get(params: &Value) -> Result<Value, String> {
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("missing id")?;
+    let rec = crate::proc_runner::get_proc(id)?;
+    serde_json::to_value(rec).map_err(|e| e.to_string())
 }
 
 fn serve_proc_input(params: &Value) -> Result<Value, String> {
@@ -9149,6 +9178,45 @@ mod tests {
             block.get("content").is_none(),
             "tool_result bodies stay stripped from the skeleton stream"
         );
+    }
+
+    /// A `fleet__job run` result keeps its job id as `_job`, and the call keeps
+    /// `command` / `need`: the phone's job card finds the job in the resource
+    /// queue by that id and shows what it runs and queues for.
+    #[test]
+    fn slim_tail_keeps_a_job_runs_id_command_and_needs() {
+        let slim = slim_tail_messages(vec![
+            json!({
+                "type": "assistant",
+                "uuid": "a1",
+                "message": { "role": "assistant", "content": [{
+                    "type": "tool_use", "id": "toolu_j", "name": "mcp__fleet__fleet__job",
+                    "input": { "action": "run", "command": "pnpm e2e", "need": ["test-db", "gpu:1"],
+                               "note": "e2e suite", "cwd": "/tmp/x" }
+                }]}
+            }),
+            json!({
+                "type": "user",
+                "uuid": "u1",
+                "message": { "role": "user", "content": [{
+                    "type": "tool_result", "tool_use_id": "toolu_j",
+                    "content": "ok: job p1a1fc3d8e44 started in /w.\nlog: /l\nresources: test-db, gpu:1 — …"
+                }]}
+            }),
+        ]);
+        let input = &slim[0]["message"]["content"][0]["input"];
+        assert_eq!(input["command"], json!("pnpm e2e"));
+        assert_eq!(input["need"], json!(["test-db", "gpu:1"]));
+        assert!(input.get("cwd").is_none(), "cwd is not something the card shows");
+        assert_eq!(slim[1]["message"]["content"][0]["_job"], json!({ "id": "p1a1fc3d8e44" }));
+    }
+
+    #[test]
+    fn job_digest_ignores_other_results() {
+        for text in ["ok: checked P1 in plan", "job p1 stopped: wake failed: x", "ok: job  started"] {
+            let block = json!({ "type": "tool_result", "content": text });
+            assert!(job_run_summary(block.as_object().unwrap()).is_none(), "{text}");
+        }
     }
 
     /// The two ingest confirmations survive the strip as a tiny `_ingest`, so
