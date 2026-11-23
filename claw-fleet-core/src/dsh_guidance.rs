@@ -354,8 +354,8 @@ retried rate limits / 5xx keep it waiting, and a real failure wakes you at once 
 with the reason. `fleet watch add/remove <watch-id> <ids…>` changes the set. \
 Never poll another session's transcript or `fleet inspect` from a shell loop — \
 the boss's follow-ups cannot reach you meanwhile.\n\
-- **Something needing exclusive use** (test DB, port, device, e2e env, GPU) → \
-`fleet job run --need test-db --need gpu:1 -- <cmd>` (foreground: `fleet \
+- **Something needing exclusive use** (test DB, port, device, e2e env) → \
+`fleet job run --need test-db --need board -- <cmd>` (foreground: `fleet \
 resource run --need …`), **declaring every resource at once**: Fleet queues it \
 machine-wide, starts it when all are granted, releases them when it ends or \
 its holder dies; `fleet resource ls` shows holders and waiters. **Never \
