@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{Holder, Priority, RequestKind, ResourceRequest, State};
+use super::{Priority, RequestKind, ResourceRequest, State};
 
 /// Size at which the live log is rotated.
 pub const ROTATE_BYTES: u64 = 2 * 1024 * 1024;
@@ -28,8 +28,7 @@ pub const ROTATE_BYTES: u64 = 2 * 1024 * 1024;
 pub const DEFAULT_LIMIT: usize = 200;
 pub const MAX_LIMIT: usize = 2000;
 
-/// What happened. New kinds (session leases' take/release) are added here;
-/// a reader skips lines it cannot parse, so an older build reading a newer
+/// What happened. A reader skips lines it cannot parse, so an older build reading a newer
 /// log drops those lines instead of failing.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
@@ -41,7 +40,8 @@ pub enum ResourceEventKind {
     Granted,
     /// A holder let go of its grant (its command ended).
     Released,
-    /// A holder was evicted by hand (`fleet resource kick`).
+    /// A holder was evicted by hand (`fleet resource kick`), or a session
+    /// lease was released on its session's behalf by someone else.
     Kicked,
     /// A queued request was cancelled before it ran.
     Cancelled,
@@ -50,8 +50,12 @@ pub enum ResourceEventKind {
     /// A queued request's own process stopped waiting (interrupted, or the
     /// queue could not be read).
     Aborted,
-    /// A request was dropped because its process is gone.
+    /// A request was dropped because its process is gone — for a session
+    /// lease, because its session has ended.
     Reaped,
+    /// A session lease moved to the session that took over its owner's work
+    /// (a handoff); `from_session_id` is the previous owner.
+    Transferred,
     /// A resource's capacity was set.
     CapacitySet,
     /// A resource was deleted from the table.
@@ -84,6 +88,12 @@ pub struct ResourceEvent {
     pub command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub workspace: Option<String>,
+    /// A session lease's description.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub note: Option<String>,
+    /// On `transferred`: the session the lease moved away from.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub from_session_id: Option<String>,
     /// Time spent queued: on `granted`, and on a queued request that left.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub waited_ms: Option<u64>,
@@ -115,6 +125,8 @@ impl ResourceEvent {
             session_id: None,
             command: None,
             workspace: None,
+            note: None,
+            from_session_id: None,
             waited_ms: None,
             held_ms: None,
             exit_code: None,
@@ -130,10 +142,12 @@ impl ResourceEvent {
             request_kind: Some(r.kind),
             needs: r.needs.clone(),
             priority: Some(r.priority),
-            pid: Some(r.holder.pid),
+            // A lease has no holder process.
+            pid: (!r.is_lease()).then_some(r.holder.pid),
             session_id: r.session_id.clone(),
             command: (!r.command.is_empty()).then(|| r.command.clone()),
             workspace: r.workspace.clone(),
+            note: r.note.clone(),
             ..Self::bare(ts_ms, kind)
         }
     }
@@ -183,6 +197,9 @@ pub(super) enum Cause {
     #[default]
     None,
     Released { id: String, exit_code: Option<i32> },
+    /// A session lease left the table: released (held) or unqueued (queued);
+    /// `by_other` — on its session's behalf, logged as kicked.
+    LeaseLeft { id: String, by_other: bool },
     Cancelled(String),
     TimedOut(String),
     Aborted(String),
@@ -190,13 +207,15 @@ pub(super) enum Cause {
 }
 
 /// What changed between `before` and `after`, in the order it happened:
-/// requests leaving, requests arriving, grants, then resource changes.
+/// requests leaving, leases changing hands, requests arriving, grants, then
+/// resource changes. `alive` says whether whatever stands behind a request
+/// (its process; a lease's session) is still there.
 pub(super) fn events_between(
     before: &State,
     after: &State,
     cause: &Cause,
     now: u64,
-    alive: &dyn Fn(&Holder) -> bool,
+    alive: &dyn Fn(&ResourceRequest) -> bool,
 ) -> Vec<ResourceEvent> {
     use ResourceEventKind as K;
     let find = |s: &State, id: &str| -> Option<(bool, ResourceRequest)> {
@@ -224,10 +243,15 @@ pub(super) fn events_between(
         } else {
             match cause {
                 Cause::Released { id, .. } if hinted(id) => K::Released,
+                Cause::LeaseLeft { id, by_other } if hinted(id) => match (was_granted, by_other) {
+                    (false, _) => K::Cancelled,
+                    (true, true) => K::Kicked,
+                    (true, false) => K::Released,
+                },
                 Cause::Cancelled(id) if hinted(id) => K::Cancelled,
                 Cause::TimedOut(id) if hinted(id) => K::TimedOut,
                 Cause::Aborted(id) if hinted(id) => K::Aborted,
-                _ if !alive(&r.holder) => K::Reaped,
+                _ if !alive(r) => K::Reaped,
                 _ if was_granted => K::Released,
                 _ => K::Cancelled,
             }
@@ -246,6 +270,16 @@ pub(super) fn events_between(
         out.push(e);
     }
 
+    // Moved to another session.
+    for r in after.grants.iter().chain(&after.queue) {
+        let Some((_, prev)) = find(before, &r.id) else { continue };
+        if r.is_lease() && prev.session_id != r.session_id {
+            let mut e = ResourceEvent::of(now, K::Transferred, r);
+            e.from_session_id = prev.session_id.clone();
+            out.push(e);
+        }
+    }
+
     // Arrived, and granted.
     let arrived = |r: &ResourceRequest| find(before, &r.id).is_none();
     for r in after.queue.iter().chain(&after.grants) {
@@ -258,7 +292,9 @@ pub(super) fn events_between(
             continue;
         }
         let at = r.granted_ms.unwrap_or(now);
-        let mut e = ResourceEvent::of(at, K::Granted, r);
+        // Stamped with the transaction's clock, read after the pass's own:
+        // a grant must not sort ahead of the release or reap that freed it.
+        let mut e = ResourceEvent::of(at.max(now), K::Granted, r);
         e.waited_ms = Some(at.saturating_sub(r.enqueued_ms));
         out.push(e);
     }
@@ -410,7 +446,17 @@ pub fn render_history(h: &ResourceHistory) -> String {
             line.push_str(&format!("  pid {pid}"));
         }
         if let Some(sid) = &e.session_id {
-            line.push_str(&format!("  session {}", sid.chars().take(8).collect::<String>()));
+            let short = |s: &str| s.chars().take(8).collect::<String>();
+            match &e.from_session_id {
+                Some(from) => line.push_str(&format!("  session {} → {}", short(from), short(sid))),
+                None => line.push_str(&format!("  session {}", short(sid))),
+            }
+        }
+        if e.request_kind == Some(RequestKind::Lease) {
+            line.push_str("  lease");
+            if let Some(n) = &e.note {
+                line.push_str(&format!(" · {n}"));
+            }
         }
         if let Some(cmd) = &e.command {
             let one: String = cmd.split_whitespace().collect::<Vec<_>>().join(" ");

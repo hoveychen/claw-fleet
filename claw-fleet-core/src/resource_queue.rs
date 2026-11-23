@@ -46,6 +46,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 pub mod history;
+pub mod lease;
 use history::Cause;
 pub use history::{
     read_history, render_history, HistoryQuery, ResourceEvent, ResourceEventKind, ResourceHistory,
@@ -879,6 +880,40 @@ impl State {
     }
 }
 
+impl State {
+    /// [`State::nesting`] for the lease `session` holds, if any.
+    fn lease_nesting(&self, session: Option<&str>, needs: &BTreeMap<String, u32>) -> Result<Nesting, String> {
+        let Some(session) = session else { return Ok(Nesting::TopLevel) };
+        let Some(held) = self
+            .grants
+            .iter()
+            .find(|g| g.is_lease() && g.session_id.as_deref() == Some(session))
+        else {
+            return Ok(Nesting::TopLevel);
+        };
+        if !needs.keys().any(|n| held.needs.contains_key(n)) {
+            return Ok(Nesting::TopLevel);
+        }
+        let missing: BTreeMap<String, u32> = needs
+            .iter()
+            .filter(|(name, &n)| held.needs.get(*name).copied().unwrap_or(0) < n)
+            .map(|(name, &n)| (name.clone(), n))
+            .collect();
+        if missing.is_empty() {
+            return Ok(Nesting::Inherited(held.id.clone()));
+        }
+        Err(format!(
+            "resource request refused: this session holds lease {} for [{}] and the command \
+             asked for [{}] on top. Commands may use what the lease holds without queueing; \
+             ask only for [{}] here, or release the lease and take everything at once.",
+            held.id,
+            format_needs(&held.needs),
+            format_needs(&missing),
+            format_needs(&missing),
+        ))
+    }
+}
+
 /// How a request relates to the grant its caller runs under.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Nesting {
@@ -1039,7 +1074,8 @@ fn record_child_at(path: &Path, id: &str, pid: u32, own_group: bool) -> Result<(
         own_group,
     };
     transact(path, |s| {
-        if s.grants.iter().any(|g| g.id == id) {
+        // A lease has no process to outlive; its id never names a command.
+        if s.grants.iter().any(|g| g.id == id && !g.is_lease()) {
             s.children.insert(id.to_string(), child);
         }
     })
@@ -1153,6 +1189,16 @@ pub fn kick(id: &str) -> Result<ResourceSnapshot, String> {
 
 fn kick_at(path: &Path, id: &str, grace: Duration) -> Result<ResourceSnapshot, String> {
     let now = now_ms();
+    // A session lease has no process to stop: kicking it releases it on its
+    // session's behalf, straight away.
+    let lease_held = transact(path, |s| {
+        s.schedule(&holder_alive, now);
+        s.grants.iter().any(|g| g.id == id && g.is_lease())
+    })?;
+    if lease_held {
+        lease::release_id_at(path, id, true)?;
+        return snapshot_at(path);
+    }
     let held = transact(path, |s| {
         s.schedule(&holder_alive, now);
         if let Some(g) = s.grants.iter().find(|g| g.id == id).cloned() {
@@ -1277,23 +1323,34 @@ pub fn check_fits(needs: &BTreeMap<String, u32>) -> Result<(), String> {
 /// * it asks for anything else → an error telling the agent to declare every
 ///   resource on the outermost command. Waiting for more while holding some is
 ///   the one way a deadlock could still form, so it is refused, not detected.
-pub fn check_nested(needs: &BTreeMap<String, u32>) -> Result<Nesting, String> {
+///
+/// The same holds for a session lease: a command started by `session_id`
+/// (the caller's agent session) for resources that session's lease already
+/// holds runs under the lease instead of queueing behind it — which would
+/// never end. Asking for some of the lease's resources and something else
+/// besides is refused the same way.
+pub fn check_nested(needs: &BTreeMap<String, u32>, session_id: Option<&str>) -> Result<Nesting, String> {
     let outer = std::env::var(GRANT_ENV).ok();
-    check_nested_at(&state_path()?, outer.as_deref(), needs)
+    check_nested_at(&state_path()?, outer.as_deref(), session_id, needs)
 }
 
 fn check_nested_at(
     path: &Path,
     outer: Option<&str>,
+    session_id: Option<&str>,
     needs: &BTreeMap<String, u32>,
 ) -> Result<Nesting, String> {
-    if outer.is_none_or(str::is_empty) {
+    let session_id = session_id.filter(|s| !s.is_empty());
+    if outer.is_none_or(str::is_empty) && session_id.is_none() {
         return Ok(Nesting::TopLevel);
     }
     let now = now_ms();
     transact(path, |s| {
         s.schedule(&holder_alive, now);
-        s.nesting(outer, needs)
+        match s.nesting(outer, needs)? {
+            Nesting::TopLevel => s.lease_nesting(session_id, needs),
+            inherited => Ok(inherited),
+        }
     })?
 }
 
@@ -1311,10 +1368,22 @@ pub fn render_snapshot(snap: &ResourceSnapshot) -> String {
         }
     };
     let describe = |r: &ResourceRequest| -> String {
+        let sid8 = |sid: &str| sid.chars().take(8).collect::<String>();
+        if r.is_lease() {
+            let mut s = format!(
+                "{}  lease · session {}",
+                r.id,
+                r.session_id.as_deref().map(sid8).unwrap_or_default()
+            );
+            if let Some(note) = &r.note {
+                s.push_str(&format!("  {}", short(note)));
+            }
+            return s;
+        }
         let what = if r.command.is_empty() { "(private)".to_string() } else { short(&r.command) };
         let mut s = format!("{}  {what}", r.id);
         if let Some(sid) = &r.session_id {
-            s.push_str(&format!("  [session {}]", sid.chars().take(8).collect::<String>()));
+            s.push_str(&format!("  [session {}]", sid8(sid)));
         }
         s
     };
@@ -1343,13 +1412,24 @@ pub fn render_snapshot(snap: &ResourceSnapshot) -> String {
     for q in &snap.queue {
         let r = &q.request;
         let waited = snap.now_ms.saturating_sub(r.enqueued_ms);
+        let mut extra = String::new();
+        if let Some(after) = r.after_ms.filter(|&t| t > snap.now_ms) {
+            let at = chrono::DateTime::from_timestamp_millis(after as i64)
+                .map(|t| t.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string())
+                .unwrap_or_default();
+            extra.push_str(&format!(" · not before {at}"));
+        }
+        if r.skips > 0 {
+            extra.push_str(&format!(" · passed {}/{}", r.skips, r.max_skips()));
+        }
         out.push_str(&format!(
-            "  #{}  {}\n      needs {} · {} priority{} · waiting {} on {}\n",
+            "  #{}  {}\n      needs {} · {} priority{}{} · waiting {} on {}\n",
             q.position,
             describe(r),
             format_needs(&r.needs),
             r.priority,
             if r.manual { " · placed by hand" } else { "" },
+            extra,
             fmt_duration(waited),
             describe_wait(&q.wait_on),
         ));
@@ -1522,6 +1602,10 @@ fn acquire_at(
         command: spec.command,
         workspace: spec.workspace,
         session_id: spec.session_id,
+        after_ms: None,
+        note: None,
+        skips: 0,
+        idle_since_ms: None,
     };
     let now = now_ms();
     transact(path, |s| {
@@ -1630,7 +1714,7 @@ pub fn run_foreground(spec: ForegroundSpec) -> i32 {
         eprintln!("fleet resource run: no command given (put it after `--`)");
         return EXIT_QUEUE_REJECTED;
     };
-    let nesting = match check_nested(&spec.needs) {
+    let nesting = match check_nested(&spec.needs, spec.session_id.as_deref()) {
         Ok(n) => n,
         Err(e) => {
             eprintln!("fleet resource run: {e}");
@@ -1846,6 +1930,10 @@ mod tests {
             command: format!("cmd-{id}"),
             workspace: None,
             session_id: None,
+            after_ms: None,
+            note: None,
+            skips: 0,
+            idle_since_ms: None,
         }
     }
 

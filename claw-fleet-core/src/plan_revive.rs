@@ -918,7 +918,6 @@ fn plans_named_by_step(blocks: &[pt::SourcedBlock], plan: &str, step: &str) -> V
 
 /// Gather [`Coverage`] for `owners` from the real stores.
 pub(crate) fn gather_coverage(owners: &HashSet<String>) -> Coverage {
-    let now = plan_snooze::now_ms();
     let mut c = Coverage::default();
 
     // Liveness: the process each launch note records (every Fleet spawn,
@@ -930,7 +929,29 @@ pub(crate) fn gather_coverage(owners: &HashSet<String>) -> Coverage {
         }
     }
     c.alive.extend(crate::live_inject::live_registered_session_ids());
+    fill_coverage(&mut c, owners);
+    c
+}
 
+/// [`gather_coverage`] for a handful of sessions: liveness is looked up for
+/// `owners` alone instead of walking every launch note on the machine, which
+/// a cold CLI process (the resource queue's lease check) cannot afford.
+pub(crate) fn coverage_for(owners: &HashSet<String>) -> Coverage {
+    let mut c = Coverage::default();
+    let registered: HashSet<String> =
+        crate::live_inject::live_registered_session_ids().into_iter().collect();
+    for sid in owners {
+        if registered.contains(sid) || crate::launch_spec::live_pid(sid).is_some() {
+            c.alive.insert(sid.clone());
+        }
+    }
+    fill_coverage(&mut c, owners);
+    c
+}
+
+/// Everything of [`Coverage`] but `alive`.
+fn fill_coverage(c: &mut Coverage, owners: &HashSet<String>) {
+    let now = plan_snooze::now_ms();
     for w in crate::watch::list() {
         if w.is_live(now) {
             c.watching.insert(w.session_id);
@@ -991,7 +1012,6 @@ pub(crate) fn gather_coverage(owners: &HashSet<String>) -> Coverage {
             c.reserved.insert(sid.clone());
         }
     }
-    c
 }
 
 // ── The decision ────────────────────────────────────────────────────────────
