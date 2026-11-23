@@ -363,7 +363,7 @@ pub fn take(spec: &LeaseSpec) -> Result<LeaseStatus, String> {
     take_at(&state_path()?, spec)
 }
 
-pub(super) fn take_at(path: &Path, spec: &LeaseSpec) -> Result<LeaseStatus, String> {
+pub(crate) fn take_at(path: &Path, spec: &LeaseSpec) -> Result<LeaseStatus, String> {
     require_session(&spec.session_id)?;
     let now = now_ms();
     transact(path, |s| {
@@ -424,7 +424,7 @@ pub fn queue(spec: &LeaseSpec) -> Result<LeaseStatus, String> {
     queue_at(&state_path()?, spec)
 }
 
-pub(super) fn queue_at(path: &Path, spec: &LeaseSpec) -> Result<LeaseStatus, String> {
+pub(crate) fn queue_at(path: &Path, spec: &LeaseSpec) -> Result<LeaseStatus, String> {
     require_session(&spec.session_id)?;
     let now = now_ms();
     transact(path, |s| {
@@ -468,7 +468,7 @@ pub fn status(session: &str) -> Result<LeaseStatus, String> {
     status_at(&state_path()?, session)
 }
 
-pub(super) fn status_at(path: &Path, session: &str) -> Result<LeaseStatus, String> {
+pub(crate) fn status_at(path: &Path, session: &str) -> Result<LeaseStatus, String> {
     require_session(session)?;
     let now = now_ms();
     transact(path, |s| {
@@ -484,7 +484,7 @@ pub fn release(session: &str, by: Option<&str>) -> Result<LeaseRelease, String> 
     release_at(&state_path()?, session, by)
 }
 
-pub(super) fn release_at(path: &Path, session: &str, by: Option<&str>) -> Result<LeaseRelease, String> {
+pub(crate) fn release_at(path: &Path, session: &str, by: Option<&str>) -> Result<LeaseRelease, String> {
     require_session(session)?;
     let found = transact(path, |s| {
         let owner = resolve(s, session);
@@ -502,7 +502,7 @@ pub fn release_id(id: &str, by_other: bool) -> Result<LeaseRelease, String> {
     release_id_at(&state_path()?, id, by_other)
 }
 
-pub(super) fn release_id_at(path: &Path, id: &str, by_other: bool) -> Result<LeaseRelease, String> {
+pub(crate) fn release_id_at(path: &Path, id: &str, by_other: bool) -> Result<LeaseRelease, String> {
     let now = now_ms();
     let cause = Cause::LeaseLeft { id: id.to_string(), by_other };
     transact_as(path, cause, |s| {

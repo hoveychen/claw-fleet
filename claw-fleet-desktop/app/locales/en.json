@@ -32,9 +32,14 @@
       "notes": "Notes",
       "history": "History",
       "job": "Job",
-      "task": "Task"
+      "task": "Task",
+      "resource": "Lease"
     },
     "param": {
+      "need": "Resources",
+      "after": "Not before",
+      "priority": "Priority",
+      "max_wait": "Max wait",
       "plan_id": "Step list",
       "plan": "Step list",
       "task": "Step",
@@ -125,6 +130,9 @@
       "open_resources": "Open in Resources"
     },
     "param_for": {
+      "resource": {
+        "note": "Holding it for"
+      },
       "handoff": {
         "note": "Briefing"
       },
@@ -242,6 +250,14 @@
         "set": "Set task goal",
         "get": "Read task profile",
         "split": "Split off new task {{title}}"
+      },
+      "resource": {
+        "take": "Take lease",
+        "queue": "Queue for lease",
+        "release": "Release lease",
+        "unqueue": "Leave lease queue",
+        "mine": "My lease",
+        "ls": "Resource table"
       }
     },
     "rec": {
@@ -1996,6 +2012,7 @@
       "notes": "Notes",
       "history": "History",
       "job": "Job",
+      "resource": "Resource lease",
       "image": "Image",
       "image_edit": "Image edit",
       "permission_prompt": "Permission prompt",

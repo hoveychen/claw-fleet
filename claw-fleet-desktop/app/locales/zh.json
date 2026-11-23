@@ -32,9 +32,14 @@
       "notes": "笔记",
       "history": "历史",
       "job": "作业",
-      "task": "任务"
+      "task": "任务",
+      "resource": "租约"
     },
     "param": {
+      "need": "资源",
+      "after": "不早于",
+      "priority": "优先级",
+      "max_wait": "最长等待",
       "plan_id": "步骤清单",
       "plan": "步骤清单",
       "task": "步骤",
@@ -125,6 +130,9 @@
       "open_resources": "在资源页查看"
     },
     "param_for": {
+      "resource": {
+        "note": "用来做什么"
+      },
       "handoff": {
         "note": "交接便条"
       },
@@ -242,6 +250,14 @@
         "set": "设定任务目标",
         "get": "查看任务画像",
         "split": "拆出新任务 {{title}}"
+      },
+      "resource": {
+        "take": "拿租约",
+        "queue": "排队等租约",
+        "release": "放租约",
+        "unqueue": "退出租约队列",
+        "mine": "我的租约",
+        "ls": "资源表"
       }
     },
     "rec": {
@@ -1993,6 +2009,7 @@
       "notes": "笔记",
       "history": "历史",
       "job": "作业",
+      "resource": "资源租约",
       "image": "生成图片",
       "image_edit": "修改图片",
       "permission_prompt": "权限询问",

@@ -1063,11 +1063,12 @@ pub fn consume_and_spawn(session_id: &str) -> Result<Option<String>, String> {
     let pdir = pending_dir().ok_or("cannot determine home dir")?;
     let cdir = chain_dir().ok_or("cannot determine home dir")?;
     let progress = crate::task_progress::progress_dir();
-    consume_and_spawn_in(
+    consume_and_spawn_full(
         &pdir,
         &cdir,
         progress.as_deref(),
         crate::watch::watches_dir().as_deref(),
+        crate::resource_queue::state_path().ok().as_deref(),
         session_id,
         now_ms(),
         spawn_successor_by_source,
@@ -1132,6 +1133,34 @@ where
         Option<&str>,
     ) -> Result<crate::session_launch::SpawnSessionResponse, String>,
 {
+    consume_and_spawn_full(pending_dir, chain_dir, progress_dir, watches_dir, None, session_id, now, spawn)
+}
+
+/// [`consume_and_spawn_in`], also moving the predecessor's session leases
+/// (`resources_state`: the resource queue's state file) to the successor.
+#[allow(clippy::too_many_arguments)]
+fn consume_and_spawn_full<S>(
+    pending_dir: &Path,
+    chain_dir: &Path,
+    progress_dir: Option<&Path>,
+    watches_dir: Option<&Path>,
+    resources_state: Option<&Path>,
+    session_id: &str,
+    now: u64,
+    spawn: S,
+) -> Result<Option<String>, String>
+where
+    S: FnOnce(
+        &str,
+        &str,
+        &str,
+        Option<&str>,
+        Option<&str>,
+        Option<&str>,
+        &str,
+        Option<&str>,
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String>,
+{
     let Some(pending) = take_pending_in(pending_dir, session_id, now) else {
         return Ok(None);
     };
@@ -1158,8 +1187,12 @@ where
     let carried: Vec<crate::watch::WatchRecord> = watches_dir
         .map(|d| crate::watch::for_session_in(d, session_id))
         .unwrap_or_default();
+    let leases: Vec<crate::resource_queue::ResourceRequest> = resources_state
+        .map(|p| crate::resource_queue::lease::leases_of_at(p, session_id))
+        .unwrap_or_default();
     let mut prompt = compose_successor_prompt(&pending, prior.as_ref());
     prompt.push_str(&carried_watch_notice(&carried));
+    prompt.push_str(&carried_lease_notice(&leases));
     // Link before spawn when the id is ours to assign. The successor's first
     // act is its SessionStart hook, and Fleet's notes-hint hook answers "whose
     // notes may this session read?" by finding the session on a chain — so the
@@ -1233,6 +1266,13 @@ where
             ));
         }
     }
+    // Leases go with the work, so the resources stay held across the relay
+    // (the queue's own lease check would move them too, lazily).
+    if let (Some(path), false) = (resources_state, leases.is_empty()) {
+        if let Err(e) = crate::resource_queue::lease::transfer_session_at(path, session_id, &to_sid) {
+            crate::log_debug(&format!("handoff: moving {session_id}'s leases failed: {e}"));
+        }
+    }
     match pre_assigned.as_deref() {
         Some(id) if id == to_sid => {}
         Some(id) => {
@@ -1251,6 +1291,25 @@ where
         pending.hop + 1
     ));
     Ok(Some(to_sid))
+}
+
+/// The successor's note on the leases it inherits (agent-facing, Chinese like
+/// the rest of the relay prompt).
+fn carried_lease_notice(leases: &[crate::resource_queue::ResourceRequest]) -> String {
+    if leases.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n\n**你继承了上一棒的资源租约**（已转到你名下，用完记得 `fleet resource release`）：\n");
+    for l in leases {
+        let state = if l.granted_ms.is_some() { "持有中" } else { "排队中，用 `fleet resource mine` 查" };
+        out.push_str(&format!(
+            "- {} [{}] {state}{}\n",
+            l.id,
+            crate::resource_queue::format_needs(&l.needs),
+            l.note.as_deref().map(|n| format!(" — {n}")).unwrap_or_default()
+        ));
+    }
+    out
 }
 
 /// `CLAUDE_CODE_ENTRYPOINT` for relay-spawned sessions, so the scanner (and
@@ -1714,6 +1773,56 @@ mod tests {
         assert!(
             prompt.contains("w-carry") && prompt.contains("套件跑完"),
             "the successor is told which wait it inherited: {prompt}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn relay_moves_the_predecessors_resource_lease_to_the_successor() {
+        use crate::resource_queue::lease;
+        let (root, pdir, cdir) = fresh_dirs("lease-carry");
+        let state = root.join("resources").join("state.json");
+        let spec = lease::LeaseSpec {
+            session_id: "s1".into(),
+            needs: crate::resource_queue::parse_needs(&["board"]).unwrap(),
+            priority: Default::default(),
+            after_ms: None,
+            note: Some("flash the board".into()),
+            workspace: None,
+        };
+        assert!(lease::take_at(&state, &spec).unwrap().is_held());
+        register_in(
+            &pdir, &cdir, "s1", "/ws", None, "note", None, None, None, None, None, None,
+            "claude-code", 1000,
+        )
+        .unwrap();
+        let seen_prompt = std::cell::RefCell::new(String::new());
+        let to = consume_and_spawn_full(
+            &pdir,
+            &cdir,
+            None,
+            None,
+            Some(&state),
+            "s1",
+            1001,
+            |_src, _w, prompt, _m, _e, _pm, _ep, sid| {
+                *seen_prompt.borrow_mut() = prompt.to_string();
+                Ok(crate::session_launch::SpawnSessionResponse {
+                    pid: 1,
+                    session_id: sid.map(str::to_string),
+                })
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert!(lease::leases_of_at(&state, "s1").is_empty());
+        let moved = lease::leases_of_at(&state, &to);
+        assert_eq!(moved.len(), 1, "the lease is the successor's now");
+        assert!(moved[0].granted_ms.is_some(), "still held — never released in between");
+        let prompt = seen_prompt.borrow();
+        assert!(
+            prompt.contains(&moved[0].id) && prompt.contains("flash the board"),
+            "the successor is told which lease it inherited: {prompt}"
         );
         let _ = fs::remove_dir_all(&root);
     }

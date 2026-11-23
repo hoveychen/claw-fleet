@@ -31,7 +31,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Names of the control tools, in `tools/list` order.
-pub const CONTROL_TOOL_NAMES: [&str; 14] = [
+pub const CONTROL_TOOL_NAMES: [&str; 15] = [
     "fleet__spawn",
     "fleet__plan",
     "fleet__handoff",
@@ -46,6 +46,7 @@ pub const CONTROL_TOOL_NAMES: [&str; 14] = [
     "fleet__history",
     "fleet__job",
     "fleet__task",
+    "fleet__resource",
 ];
 
 /// True when `name` is one of the control tools this module owns.
@@ -111,6 +112,7 @@ pub fn control_tool_defs() -> Vec<Value> {
         history_tool_def(),
         job_tool_def(),
         task_tool_def(),
+        resource_tool_def(),
     ]
 }
 
@@ -255,6 +257,26 @@ fn job_tool_def() -> Value {
                 "id": {"type": "string", "description": "Job id. Required for wait/status/stop."},
                 "timeout": {"type": "integer", "description": "Seconds to block (wait only), max 540."},
                 "tail": {"type": "integer", "description": "Output lines to show (wait/status), default 20, max 200."}
+            },
+            "required": ["action"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn resource_tool_def() -> Value {
+    json!({
+        "name": "fleet__resource",
+        "description": "Session LEASES on machine-global resources: hold something exclusive (a dev board, a phone, a test device) across many commands and turns, until you release it — not just for one command. For ONE command use fleet__job's `need` instead; it releases when the command exits. A lease belongs to this session: it moves to your successor on a handoff, and is released automatically about 2 minutes after the session has ended (no process, watch, card or handoff left); someone can also release it on your behalf. Actions: take (grant now or refuse — nothing is queued), queue (wait in line, optionally not before `after`; granted at once if free — then register `fleet__watch` with until `fleet resource mine --session <your id>`, which exits 0 once it is yours), release (let go, or leave the queue; the next in line gets it at once), unqueue (leave the queue), mine (held / queued / none), ls (the whole table). Declare ALL resources in one take/queue: a session holds at most one lease, and asking for more while holding some is refused (release, then take everything at once). Commands you run for resources your lease holds (fleet__job need, `fleet resource run`) run under the lease without queueing.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["take", "queue", "release", "unqueue", "mine", "ls"]},
+                "need": {"type": "array", "items": {"type": "string"}, "description": "Resources (take/queue), each `name` or `name:units` — e.g. [\"esp-board\"]. Same names as fleet__job's need; `fleet resource ls` shows the existing ones."},
+                "note": {"type": "string", "description": "What you hold it for, shown to everyone (take/queue), e.g. \"flashing firmware for the e2e run\"."},
+                "after": {"type": "string", "description": "queue only: not granted before this — `30m`, `8h`, `21:00`, `11-24 09:00` or `2026-11-24 09:00` (local). Until then it holds nobody up."},
+                "priority": {"type": "string", "enum": ["high", "normal", "low"], "description": "Queue priority (take/queue); default normal."},
+                "session": {"type": "string", "description": "release / mine: another session's id (or an ≥8-char prefix) instead of yours — releasing another session's lease is a hand-over on its behalf, logged as such."}
             },
             "required": ["action"],
             "additionalProperties": false
@@ -415,6 +437,7 @@ pub fn handle(
         "fleet__history" => handle_history(args, session_id),
         "fleet__job" => handle_job(args, session_id, cwd),
         "fleet__task" => handle_task(args, session_id),
+        "fleet__resource" => handle_resource(args, session_id, cwd),
         other => Err(format!("unknown control tool: {other}")),
     }
 }
@@ -789,19 +812,109 @@ fn job_wait_footer(rec: &crate::proc_runner::ProcRecord) -> String {
     }
 }
 
+fn handle_resource(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String, String> {
+    use crate::resource_queue::{self as rq, lease};
+    let action = action_of(args)?;
+    if action == "ls" {
+        return Ok(rq::render_snapshot(&rq::snapshot()?));
+    }
+    let me = sid.filter(|s| !s.is_empty());
+    let target = || -> Result<String, String> {
+        arg(args, "session")
+            .or_else(|| me.map(str::to_string))
+            .ok_or_else(|| NO_SESSION_ID.to_string())
+    };
+    let spec = |after_ms: Option<u64>| -> Result<lease::LeaseSpec, String> {
+        let needs = rq::parse_needs(&need_list(args)?)?;
+        if needs.is_empty() {
+            return Err("`need` is required for this action".into());
+        }
+        Ok(lease::LeaseSpec {
+            session_id: me.ok_or(NO_SESSION_ID)?.to_string(),
+            needs,
+            priority: match arg(args, "priority") {
+                Some(p) => p.parse()?,
+                None => Default::default(),
+            },
+            after_ms,
+            note: arg(args, "note"),
+            workspace: Some(cwd.to_string_lossy().into_owned()),
+        })
+    };
+    match action.as_str() {
+        "take" => {
+            let st = lease::take(&spec(None)?)?;
+            Ok(st.describe())
+        }
+        "queue" => {
+            let after = match arg(args, "after") {
+                Some(a) => Some(lease::parse_after(&a, now_ms())?),
+                None => None,
+            };
+            let sp = spec(after)?;
+            let st = lease::queue(&sp)?;
+            let mut out = st.describe();
+            if !st.is_held() {
+                out.push_str(&format!(
+                    "\nWait for it with fleet__watch: until `fleet resource mine --session {}`                      (exits 0 once the lease is yours).",
+                    sp.session_id
+                ));
+            }
+            Ok(out)
+        }
+        "release" | "unqueue" => {
+            let who = target()?;
+            if action == "unqueue" {
+                if let lease::LeaseStatus::Held { lease } = lease::status(&who)? {
+                    return Err(format!("{} is held, not queued — use action=release", lease.id));
+                }
+            }
+            let rel = lease::release(&who, me)?;
+            Ok(match rel.lease {
+                None => "ok: no lease held or queued — nothing to do.".to_string(),
+                Some(l) => {
+                    let what = if rel.was_held { "released" } else { "left the queue" };
+                    let next: Vec<&str> = rel.handed_to.iter().map(|r| r.id.as_str()).collect();
+                    if next.is_empty() {
+                        format!("ok: {} [{}] {what}.", l.id, rq::format_needs(&l.needs))
+                    } else {
+                        format!(
+                            "ok: {} [{}] {what}; now granted: {}.",
+                            l.id,
+                            rq::format_needs(&l.needs),
+                            next.join(", ")
+                        )
+                    }
+                }
+            })
+        }
+        "mine" => Ok(lease::status(&target()?)?.describe()),
+        other => Err(format!("unknown resource action: {other}")),
+    }
+}
+
+/// `need` as a list of `name[:units]` strings (a single string is accepted).
+fn need_list(args: &Value) -> Result<Vec<String>, String> {
+    match args.get("need") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::String(s)) => Ok(vec![s.clone()]),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| "`need` must be a list of strings like \"test-db\" or \"gpu:2\"".to_string())
+            })
+            .collect(),
+        Some(_) => Err("`need` must be a list of strings like \"test-db\" or \"gpu:2\"".into()),
+    }
+}
+
 /// The resource side of `fleet__job run`: `need` (a list of `name[:units]`, or
 /// one such string), `priority` (high / normal / low) and `max_wait` (`30m`,
 /// `90s`, or bare seconds).
 fn job_run_options(args: &Value) -> Result<crate::job::RunOptions, String> {
-    let specs: Vec<String> = match args.get("need") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::String(s)) => vec![s.clone()],
-        Some(Value::Array(items)) => items
-            .iter()
-            .map(|v| v.as_str().map(str::to_string).ok_or("`need` must be a list of strings like \"test-db\" or \"gpu:2\""))
-            .collect::<Result<_, _>>()?,
-        Some(_) => return Err("`need` must be a list of strings like \"test-db\" or \"gpu:2\"".into()),
-    };
+    let specs = need_list(args)?;
     let needs = crate::resource_queue::parse_needs(&specs)?;
     let priority = match arg(args, "priority") {
         Some(p) => p.parse()?,
@@ -2621,7 +2734,7 @@ mod tests {
     /// A new tool added to CONTROL_TOOL_NAMES fails here until someone decides.
     #[test]
     fn parent_scoped_control_tools_are_classified() {
-        const SESSION_AGNOSTIC: [&str; 9] = [
+        const SESSION_AGNOSTIC: [&str; 10] = [
             // `fleet__spawn` reads the caller's id only to inherit model /
             // effort / workspace; it writes nothing against that session, so a
             // subagent calling it starts a *new* session rather than disturbing
@@ -2639,6 +2752,10 @@ mod tests {
             // Reads the caller's task; only `set` writes it, and that one
             // action is refused for subagents in mcp_server.
             "fleet__task",
+            // A lease taken by a subagent is held under the parent's session
+            // on purpose: the subagent works the parent's turn, and the lease
+            // must outlive the subagent until the parent releases it.
+            "fleet__resource",
         ];
         for name in CONTROL_TOOL_NAMES {
             let parent_scoped = parent_scoped_effect(name).is_some();
