@@ -281,7 +281,7 @@ teardown_fleet() {
 state_file() { printf '%s\n' "$FLEET_HOME/.fleet/resources/state.json"; }
 
 if [[ ! -x "$FLEET_TEST_BIN" ]] || ! "$FLEET_TEST_BIN" resource run --help 2>/dev/null | grep -q -- '--need'; then
-  printf '  SKIP resource-queue tests: no fleet-cli with `resource run` at %s (build it or set FLEET_TEST_BIN)\n' "$FLEET_TEST_BIN"
+  printf '  SKIP resource-queue tests: no fleet-cli with "resource run" at %s (build it or set FLEET_TEST_BIN)\n' "$FLEET_TEST_BIN"
 else
 
 setup_fleet
