@@ -890,6 +890,7 @@ async function handleIPC(
     case "resource_set_capacity":
     case "resource_kick":
     case "resource_remove":
+    case "resource_history":
       return handleResourceIPC(cmd, args);
     case "search_sessions": {
       // Real-shaped FTS over the mock transcripts: match any message whose

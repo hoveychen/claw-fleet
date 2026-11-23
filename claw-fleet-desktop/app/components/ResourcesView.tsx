@@ -27,6 +27,7 @@ import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Presence } from "./Presence";
 import { SkeletonList, Spinner } from "./loading";
+import { ResourceHistorySection } from "./ResourceHistory";
 import styles from "./ResourcesView.module.css";
 
 /** How often the table is re-read while the page is open. Holders come and go
@@ -239,6 +240,7 @@ export function ResourcesView() {
             ))}
           </div>
         )}
+        {snap && <ResourceHistorySection resources={resources.map((r) => r.name)} />}
       </div>
     </PageShell>
   );

@@ -61,3 +61,14 @@ pub(crate) async fn resource_remove(
     let backend = state.backend.clone();
     super::blocking::run_blocking_result(move || backend.resource_remove(name)).await
 }
+
+/// The queue's event log, newest first. `query` may be omitted (newest page).
+#[tauri::command]
+pub(crate) async fn resource_history(
+    query: Option<claw_fleet_core::resource_queue::HistoryQuery>,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::resource_queue::ResourceHistory, String> {
+    let backend = state.backend.clone();
+    super::blocking::run_blocking_result(move || backend.resource_history(query.unwrap_or_default()))
+        .await
+}

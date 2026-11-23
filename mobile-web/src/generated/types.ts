@@ -682,6 +682,25 @@ holders: Array<ResourceRequest>, queue: Array<QueuedRequest>, };
 
 export type MoveTarget = { "index": number } | { "before": string };
 
+export type ResourceEventKind = "enqueued" | "granted" | "released" | "kicked" | "cancelled" | "timed_out" | "aborted" | "reaped" | "capacity_set" | "resource_removed";
+
+export type ResourceEvent = { tsMs: number, kind: ResourceEventKind, requestId?: string | null, requestKind?: RequestKind | null, 
+needs?: { [key in string]: number }, priority?: Priority | null, 
+pid?: number | null, sessionId?: string | null, command?: string | null, workspace?: string | null, 
+waitedMs?: number | null, 
+heldMs?: number | null, 
+exitCode?: number | null, 
+resource?: string | null, capacity?: number | null, prevCapacity?: number | null, };
+
+export type ResourceHistory = { events: Array<ResourceEvent>, 
+hasMore: boolean, };
+
+export type HistoryQuery = { 
+resource?: string | null, 
+requestId?: string | null, 
+beforeMs?: number | null, 
+limit?: number | null, };
+
 export type HostFeatures = { 
 terminal: boolean, 
 localeDefault?: string | null, 

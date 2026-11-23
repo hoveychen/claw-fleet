@@ -253,6 +253,10 @@ fn build_bundle() -> String {
         claw_fleet_core::resource_queue::ResourceView,
         claw_fleet_core::resource_queue::ResourceSnapshot,
         claw_fleet_core::resource_queue::MoveTarget,
+        claw_fleet_core::resource_queue::ResourceEventKind,
+        claw_fleet_core::resource_queue::ResourceEvent,
+        claw_fleet_core::resource_queue::ResourceHistory,
+        claw_fleet_core::resource_queue::HistoryQuery,
         claw_fleet_core::feature_flags::HostFeatures,
         claw_fleet_core::host_identity::HostIdentity,
     );

@@ -7,7 +7,11 @@
 // UI fixture, not a second scheduler.
 
 import type {
+  HistoryQuery,
   MoveTarget,
+  ResourceEvent,
+  ResourceEventKind,
+  ResourceHistory,
   QueuedRequest,
   ResourceRequest,
   ResourceSnapshot,
@@ -123,6 +127,73 @@ export function mockResourceMove(id: string, target: MoveTarget): ResourceSnapsh
 
 export function mockResourceCancel(id: string): ResourceSnapshot {
   const from = queuedIndex(id);
+  const r = state.queue[from].request;
+  history.push(ev("cancelled", r, Date.now(), { waitedMs: Date.now() - r.enqueuedMs }));
   state = { ...state, queue: state.queue.filter((_, i) => i !== from) };
   return mockResourceSnapshot();
+}
+
+// ── History ──────────────────────────────────────────────────────────────────
+// An hour of finished work plus the live table's own enqueue/grant events,
+// so the history card has every kind of row to show.
+
+function ev(kind: ResourceEventKind, r: ResourceRequest, tsMs: number, extra: Partial<ResourceEvent> = {}): ResourceEvent {
+  return {
+    tsMs,
+    kind,
+    requestId: r.id,
+    requestKind: r.kind,
+    needs: r.needs,
+    priority: r.priority,
+    pid: r.holder.pid,
+    command: r.command || undefined,
+    workspace: r.workspace,
+    ...extra,
+  };
+}
+
+function seedHistory(): ResourceEvent[] {
+  if (empty) return [];
+  const now = Date.now();
+  const out: ResourceEvent[] = [
+    { tsMs: now - 70 * MIN, kind: "capacity_set", resource: "gpu", capacity: 2, prevCapacity: 1, needs: {} },
+  ];
+  const done = (r: ResourceRequest, waitMs: number, holdMs: number, end: ResourceEventKind, exitCode?: number) => {
+    out.push(ev("enqueued", r, r.enqueuedMs));
+    if (end === "cancelled" || end === "timed_out") {
+      out.push(ev(end, r, r.enqueuedMs + waitMs, { waitedMs: waitMs }));
+      return;
+    }
+    out.push(ev("granted", r, r.enqueuedMs + waitMs, { waitedMs: waitMs }));
+    out.push(ev(end, r, r.enqueuedMs + waitMs + holdMs, { heldMs: holdMs, exitCode }));
+  };
+  const ws = "/Users/boss/workspace/vision-lab";
+  done(req("job-5a01", { gpu: 1 }, "python train.py --epochs 10", ws, 66 * MIN), 0, 9 * MIN, "released", 0);
+  done(req("job-5b17", { "staging-db": 1 }, "pnpm test:e2e --project=webkit", "/Users/boss/workspace/shop-web", 60 * MIN), 30_000, 4 * MIN, "released", 1);
+  done(req("job-5c4e", { gpu: 1 }, "python sweep.py --trials 50", ws, 57 * MIN), 2 * MIN, 12 * MIN, "kicked", 143);
+  done(req("job-5d90", { "staging-db": 1 }, "pnpm db:seed", "/Users/boss/workspace/shop-web", 40 * MIN), 5 * MIN, 0, "timed_out");
+  done(req("job-5e22", { gpu: 1 }, "python infer.py --batch 8", ws, 35 * MIN), 0, 3 * MIN, "reaped");
+  done(req("job-5f63", { cargo: 1 }, "cargo build --release", "/Users/boss/workspace/search-api", 30 * MIN), 20_000, 0, "cancelled");
+  for (const h of state.holders) {
+    out.push(ev("enqueued", h, h.enqueuedMs));
+    out.push(ev("granted", h, h.grantedMs ?? h.enqueuedMs, { waitedMs: (h.grantedMs ?? h.enqueuedMs) - h.enqueuedMs }));
+  }
+  for (const q of state.queue) out.push(ev("enqueued", q.request, q.request.enqueuedMs));
+  return out;
+}
+
+const history: ResourceEvent[] = seedHistory();
+
+export function mockResourceHistory(q: HistoryQuery): ResourceHistory {
+  const limit = Math.min(Math.max(q.limit ?? 200, 1), 2000);
+  const all = [...history]
+    .sort((a, b) => a.tsMs - b.tsMs)
+    .reverse()
+    .filter(
+      (e) =>
+        (q.beforeMs == null || e.tsMs < q.beforeMs) &&
+        (!q.resource || e.resource === q.resource || q.resource in (e.needs ?? {})) &&
+        (!q.requestId || e.requestId === q.requestId),
+    );
+  return { events: all.slice(0, limit), hasMore: all.length > limit };
 }

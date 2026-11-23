@@ -132,3 +132,31 @@ pub(crate) fn route_resources_remove(
 ) {
     with_body(request, json_header, |b: NameBody| rq::remove_resource(&b.name));
 }
+
+/// `POST /resources/history` with a [`rq::HistoryQuery`] body (an empty or
+/// missing body reads the newest page) — the event log, newest first.
+pub(crate) fn route_resources_history(
+    mut request: tiny_http::Request,
+    json_header: tiny_http::Header,
+) {
+    let mut bytes = Vec::new();
+    let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut bytes);
+    let query: rq::HistoryQuery = if bytes.iter().all(u8::is_ascii_whitespace) {
+        rq::HistoryQuery::default()
+    } else {
+        match serde_json::from_slice(&bytes) {
+            Ok(q) => q,
+            Err(e) => {
+                let body = serde_json::json!({ "error": format!("bad request: {e}") }).to_string();
+                return respond(request, json_header, 400, body);
+            }
+        }
+    };
+    match rq::read_history(&query) {
+        Ok(h) => respond(request, json_header, 200, serde_json::to_string(&h).unwrap_or_default()),
+        Err(e) => {
+            let body = serde_json::json!({ "error": e }).to_string();
+            respond(request, json_header, 500, body);
+        }
+    }
+}

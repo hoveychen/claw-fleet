@@ -849,7 +849,10 @@ fn queue_then_run(dir: &Path, id: &str) -> Result<i32, String> {
     }
     write_record(dir, &rec)?;
     let result = run_host(dir, id);
-    grant.release();
+    match &result {
+        Ok(code) => grant.release_with_exit(*code),
+        Err(_) => grant.release(),
+    }
     result
 }
 

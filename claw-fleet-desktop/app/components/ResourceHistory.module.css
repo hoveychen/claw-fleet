@@ -1,0 +1,178 @@
+/* Resource queue history: one compact row per event, newest first. */
+
+.history {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-card);
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.filter {
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+
+.error {
+  font-size: var(--font-size-xs);
+  color: var(--color-error);
+}
+
+.none {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-dim);
+  padding: 2px 0;
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--color-border-soft);
+  min-width: 0;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.when {
+  flex: 0 0 auto;
+  min-width: 62px;
+  font-size: var(--font-size-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  padding-top: 2px;
+}
+
+.kind {
+  flex: 0 0 auto;
+  min-width: 52px;
+  text-align: center;
+  font-size: var(--font-size-2xs);
+  border-radius: var(--radius-xs);
+  padding: 0 5px;
+  line-height: 17px;
+  background: var(--color-bg-sunken);
+  color: var(--color-text-secondary);
+}
+
+.kind[data-tone="accent"] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.kind[data-tone="ok"] {
+  background: rgba(var(--color-success-rgb), 0.14);
+  color: var(--color-success);
+}
+
+.kind[data-tone="warn"] {
+  background: rgba(var(--color-warning-rgb), 0.14);
+  color: var(--color-warning);
+}
+
+.kind[data-tone="bad"] {
+  background: rgba(var(--color-error-rgb), 0.14);
+  color: var(--color-error);
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.command {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-code-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.what {
+  font-size: var(--font-size-xs);
+  color: var(--color-text);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.needs {
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+}
+
+.bad_exit {
+  color: var(--color-error);
+}
+
+.sid {
+  font-family: var(--font-mono);
+  color: var(--color-accent);
+}
+
+.pid {
+  color: var(--color-text-dim);
+}
+
+.more {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-field);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.more:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}

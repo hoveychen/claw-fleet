@@ -1717,6 +1717,7 @@ pub fn run() {
             resource_set_capacity,
             resource_kick,
             resource_remove,
+            resource_history,
             keep_awake_supported,
             get_keep_awake,
             set_keep_awake,

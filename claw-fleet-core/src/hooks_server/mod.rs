@@ -1962,6 +1962,7 @@ fn handle_request(
             crate::routes::RESOURCES_REMOVE if request.method() == &tiny_http::Method::Post => {
                 route_resources_remove(request, json_header)
             }
+            crate::routes::RESOURCES_HISTORY => route_resources_history(request, json_header),
 
             // ── Interaction mode endpoints ───────────────────────────────────
             crate::routes::APPLY_INTERACTION_MODE => {
