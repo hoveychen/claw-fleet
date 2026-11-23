@@ -775,6 +775,7 @@ export const LIVE_ROUTES: Record<string, (a: Record<string, unknown>) => LiveReq
   }),
   resource_kick: (a) => ({ method: "POST", path: "/resources/kick", body: { id: a.id } }),
   resource_remove: (a) => ({ method: "POST", path: "/resources/remove", body: { name: a.name } }),
+  resource_history: (a) => ({ method: "POST", path: "/resources/history", body: a.query ?? {} }),
 
   read_explorer_bytes: (a) => ({
     method: "GET",

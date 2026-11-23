@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { QueuedRequest, ResourceRequest, ResourceSnapshot } from "./generated/types";
+import type { ResourceEvent } from "./generated/types";
 import {
+  eventDetails,
+  eventKind,
+  eventTime,
+  eventTitle,
   commandLabel,
   fmtDuration,
   moveTargets,
@@ -129,5 +134,43 @@ describe("labels", () => {
     expect(lines[1]).toContain("run b");
     const gone = queued(5, req("z", { gpu: 1 }), [{ resource: "gpu", reason: "busy", by: ["vanished"] }]);
     expect(waitLines(gone, SNAP)[0]).toContain("vanished");
+  });
+});
+
+describe("history rows", () => {
+  const released = {
+    tsMs: 0,
+    kind: "released",
+    requestId: "r1",
+    needs: { gpu: 2, db: 1 },
+    command: "python   train.py\n --epochs 3",
+    heldMs: 125_000,
+    exitCode: 1,
+  } as ResourceEvent;
+
+  it("titles a request event by its one-line command and a table event by its resource", () => {
+    expect(eventTitle(released)).toBe("python train.py --epochs 3");
+    expect(eventTitle({ tsMs: 0, kind: "capacity_set", resource: "gpu", capacity: 3, prevCapacity: 1 } as ResourceEvent)).toContain("1 → 3");
+    expect(eventTitle({ tsMs: 0, kind: "granted", requestId: "r9" } as ResourceEvent)).toBe("r9");
+  });
+
+  it("lists needs, hold time and exit code", () => {
+    const d = eventDetails(released);
+    expect(d).toContain("gpu:2, db");
+    expect(d).toContain("2m");
+    expect(d).toContain("1");
+  });
+
+  it("gives every kind a label and a tone", () => {
+    for (const k of ["enqueued", "granted", "released", "kicked", "cancelled", "timed_out", "aborted", "reaped", "capacity_set", "resource_removed"] as const) {
+      expect(eventKind(k).label).not.toBe("");
+    }
+    expect(eventKind("kicked").tone).toBe("bad");
+  });
+
+  it("shows only the time for today and the date otherwise", () => {
+    const now = new Date(2026, 10, 23, 15, 0, 0).getTime();
+    expect(eventTime(new Date(2026, 10, 23, 9, 5, 7).getTime(), now)).toBe("09:05:07");
+    expect(eventTime(new Date(2026, 10, 20, 9, 5, 7).getTime(), now)).toBe("11-20 09:05");
   });
 });

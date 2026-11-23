@@ -3507,6 +3507,27 @@
     "private_command": "（隐身会话的命令）",
     "dur_h": "{{h}}时{{m}}分",
     "dur_m": "{{m}}分{{s}}秒",
-    "dur_s": "{{s}}秒"
+    "dur_s": "{{s}}秒",
+    "history": "历史",
+    "history_filter": "按资源筛选",
+    "history_all": "全部资源",
+    "history_empty": "还没有记录",
+    "history_more": "加载更早的",
+    "ev_enqueued": "入队",
+    "ev_granted": "拿到",
+    "ev_released": "释放",
+    "ev_kicked": "被踢",
+    "ev_cancelled": "已取消",
+    "ev_timed_out": "等待超时",
+    "ev_aborted": "放弃排队",
+    "ev_reaped": "进程消失回收",
+    "ev_capacity_set": "容量变更",
+    "ev_resource_removed": "资源删除",
+    "ev_capacity_from_to": "容量 {{from}} → {{to}}",
+    "ev_capacity_to": "容量 {{to}}",
+    "ev_waited": "等了 {{d}}",
+    "ev_held": "持有 {{d}}",
+    "ev_exit": "退出码 {{code}}",
+    "dur_ms": "{{ms}}毫秒"
   }
 }

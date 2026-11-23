@@ -2712,6 +2712,10 @@ impl LocalBackend {
         rq::remove_resource(&name)
     }
 
+    pub fn resource_history(&self, query: rq::HistoryQuery) -> Result<rq::ResourceHistory, String> {
+        rq::read_history(&query)
+    }
+
     pub fn list_procs(&self) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
         claw_fleet_core::proc_runner::list_procs()
     }

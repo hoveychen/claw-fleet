@@ -2748,6 +2748,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "resource_list" => serve_resource_list(params),
         "resource_move" => serve_resource_move(params),
         "resource_cancel" => serve_resource_cancel(params),
+        "resource_history" => serve_resource_history(params),
         // ── HTTP tunnel ─────────────────────────────────────────────────────
         // The desktop web bundle's fetches, replayed against this host's own
         // `fleet serve` routes behind a whitelist — see relay_http.
@@ -4399,6 +4400,18 @@ fn serve_resource_cancel(params: &Value) -> Result<Value, String> {
     serde_json::to_value(snap).map_err(|e| e.to_string())
 }
 
+/// `{ resource?, requestId?, beforeMs?, limit? }` → the queue's event log,
+/// newest first.
+fn serve_resource_history(params: &Value) -> Result<Value, String> {
+    let query: crate::resource_queue::HistoryQuery = if params.is_null() {
+        Default::default()
+    } else {
+        serde_json::from_value(params.clone()).map_err(|e| format!("bad resource_history query: {e}"))?
+    };
+    let h = crate::resource_queue::read_history(&query)?;
+    serde_json::to_value(h).map_err(|e| e.to_string())
+}
+
 /// Every proc this host knows about (newest first — `list_procs` already
 /// orders them) — how a reopened terminal panel finds the sessions it left
 /// running. The pty host is detached, so closing the tab, or the whole
@@ -5545,6 +5558,11 @@ mod tests {
             )
             .unwrap_err();
             assert!(err.contains("bad resource_move target"), "{err}");
+
+            let h = serve_request("resource_history", &json!({ "resource": "gpu" })).unwrap();
+            assert_eq!(h["events"][0]["kind"], "capacity_set");
+            assert_eq!(h["events"][0]["capacity"], 2);
+            assert!(serve_request("resource_history", &json!({ "limit": "x" })).is_err());
         });
     }
 

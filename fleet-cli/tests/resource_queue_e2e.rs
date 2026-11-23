@@ -156,6 +156,18 @@ fn foreground_passes_stdio_and_exit_code_through() {
     assert_eq!(snap.resources.len(), 1);
     assert_eq!((snap.resources[0].name.as_str(), snap.resources[0].capacity), ("x", 1), "created on first use");
 
+    // The history keeps the run after the table has forgotten it.
+    let out = fleet(home.path()).args(["resource", "history", "--json"]).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let h: rq::ResourceHistory = serde_json::from_slice(&out.stdout).unwrap();
+    let kinds: Vec<_> = h.events.iter().rev().map(|e| e.kind).collect();
+    use rq::ResourceEventKind as K;
+    assert_eq!(kinds, vec![K::Enqueued, K::Granted, K::Released]);
+    assert_eq!(h.events[0].exit_code, Some(7));
+    let text = fleet(home.path()).args(["resource", "history", "--resource", "x"]).output().unwrap();
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(text.contains("released") && text.contains("exit 7"), "{text}");
+
     // A command that does not exist is reported, and holds nothing afterwards.
     let out = fleet(home.path())
         .args(["resource", "run", "--need", "x", "--", "/no/such/program"])

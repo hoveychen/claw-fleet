@@ -8,9 +8,15 @@
  * lock (and `kick` waits for the holder to let go), and an instant mock hides
  * the races between the panel's poll and its own writes.
  *
- * `?mock&resources=empty` starts with an empty table.
+ * Every transition is also appended to an in-memory event log, seeded with
+ * an hour of finished work, so the history section has something to show.
+ *
+ * `?mock&resources=empty` starts with an empty table and no history.
  */
 import type {
+  HistoryQuery,
+  ResourceEvent,
+  ResourceEventKind,
   MoveTarget,
   QueuedRequest,
   ResourceRequest,
@@ -26,6 +32,80 @@ interface MockState {
   capacity: Record<string, number>;
   grants: ResourceRequest[];
   queue: ResourceRequest[];
+  history: ResourceEvent[];
+}
+
+function ev(kind: ResourceEventKind, r: ResourceRequest, tsMs: number, extra: Partial<ResourceEvent> = {}): ResourceEvent {
+  return {
+    tsMs,
+    kind,
+    requestId: r.id,
+    requestKind: r.kind,
+    needs: r.needs,
+    priority: r.priority,
+    pid: r.holder.pid,
+    sessionId: r.sessionId,
+    command: r.command || undefined,
+    workspace: r.workspace,
+    ...extra,
+  };
+}
+
+/** A finished request: queued, granted after `waitMs`, then ended by `end`
+ *  after `holdMs`. Returns its events oldest first. */
+function finished(
+  r: ResourceRequest,
+  waitMs: number,
+  holdMs: number,
+  end: ResourceEventKind,
+  exitCode?: number,
+): ResourceEvent[] {
+  const t0 = r.enqueuedMs;
+  const out = [ev("enqueued", r, t0)];
+  if (end === "cancelled" || end === "timed_out") {
+    out.push(ev(end, r, t0 + waitMs, { waitedMs: waitMs }));
+    return out;
+  }
+  out.push(ev("granted", r, t0 + waitMs, { waitedMs: waitMs }));
+  out.push(ev(end, r, t0 + waitMs + holdMs, { heldMs: holdMs, exitCode }));
+  return out;
+}
+
+function seedHistory(s: Omit<MockState, "history">): ResourceEvent[] {
+  const now = Date.now();
+  const min = 60_000;
+  const old = (id: string, needs: Record<string, number>, agoMs: number, command: string, extra: Partial<ResourceRequest> = {}) =>
+    req(id, needs, agoMs, command, extra);
+  const past: ResourceEvent[] = [
+    { tsMs: now - 62 * min, kind: "capacity_set", resource: "cargo", capacity: 2, prevCapacity: 1, needs: {} },
+    ...finished(old("r19c49e011", { cargo: 1 }, 58 * min, "cargo test -p fleet-cli --test resource_queue_e2e", { kind: "foreground", sessionId: "2b7c9e41-5f0d-4c61-9a8e-0d3f6e2a7b10" }), 0, 3 * min + 12_000, "released", 0),
+    ...finished(old("p1a1fb0c2d11", { "test-db": 1 }, 51 * min, "pnpm test:db --runInBand", { sessionId: "8e1d0c55-3a2b-4f7e-b6a1-77c2e9d04f3a" }), 2_000, 6 * min, "released", 1),
+    ...finished(old("p1a1fb1e9a02", { gpu: 1 }, 44 * min, "python train.py --epochs 20", { sessionId: "f2a8b6d1-0c94-4e57-8b3a-61d9e5c27f08", workspace: "/Users/demo/workspace/vector-lab" }), 0, 21 * min, "kicked", 143),
+    ...finished(old("r19c49f3b7", { cargo: 1 }, 30 * min, "cargo build --release", { kind: "foreground" }), 4 * min, 0, "timed_out"),
+    ...finished(old("p1a1fb2f0e55", { "e2e-env": 1, "test-db": 1 }, 25 * min, "pnpm e2e --project mobile", { sessionId: "c4f09a12-6e3d-4b8a-9f21-5a0b7d3e8c64" }), 90_000, 7 * min, "reaped"),
+    ...finished(old("p1a1fb3aa871", { gpu: 1 }, 18 * min, "python eval.py --suite small"), 40_000, 0, "cancelled"),
+  ];
+  const live: ResourceEvent[] = [];
+  for (const g of s.grants) {
+    live.push(ev("enqueued", g, g.enqueuedMs));
+    live.push(ev("granted", g, g.grantedMs ?? g.enqueuedMs, { waitedMs: (g.grantedMs ?? g.enqueuedMs) - g.enqueuedMs }));
+  }
+  for (const q of s.queue) live.push(ev("enqueued", q, q.enqueuedMs));
+  return [...past, ...live].sort((a, b) => a.tsMs - b.tsMs);
+}
+
+/** `read_history_at`: newest first, filtered, one page. */
+function readHistory(s: MockState, q: HistoryQuery) {
+  const limit = Math.min(Math.max(q.limit ?? 200, 1), 2000);
+  const all = [...s.history]
+    .sort((a, b) => b.tsMs - a.tsMs)
+    .filter(
+      (e) =>
+        (q.beforeMs == null || e.tsMs < q.beforeMs) &&
+        (!q.resource || e.resource === q.resource || q.resource in (e.needs ?? {})) &&
+        (!q.requestId || e.requestId === q.requestId),
+    );
+  return { events: all.slice(0, limit), hasMore: all.length > limit };
 }
 
 let state: MockState | null = null;
@@ -56,9 +136,9 @@ function seed(): MockState {
   const empty =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("resources") === "empty";
-  if (empty) return { capacity: {}, grants: [], queue: [] };
+  if (empty) return { capacity: {}, grants: [], queue: [], history: [] };
   const now = Date.now();
-  return {
+  const table: Omit<MockState, "history"> = {
     capacity: { cargo: 2, "test-db": 1, gpu: 1, "e2e-env": 1 },
     grants: [
       req("r19c4a1f2e", { cargo: 1 }, 4 * 60_000, "cargo test -p claw-fleet-core --lib", {
@@ -93,6 +173,7 @@ function seed(): MockState {
       }),
     ],
   };
+  return { ...table, history: seedHistory(table) };
 }
 
 function st(): MockState {
@@ -131,7 +212,10 @@ function schedule(s: MockState) {
   const now = Date.now();
   const taken = grant.map((i) => s.queue[i]);
   s.queue = s.queue.filter((_, i) => !grant.includes(i));
-  for (const r of taken) s.grants.push({ ...r, grantedMs: now });
+  for (const r of taken) {
+    s.grants.push({ ...r, grantedMs: now });
+    s.history.push(ev("granted", r, now, { waitedMs: now - r.enqueuedMs }));
+  }
 }
 
 function snapshot(s: MockState): ResourceSnapshot {
@@ -196,22 +280,29 @@ export function handleResourceIPC(cmd: string, args: Record<string, unknown>): P
       });
     case "resource_cancel":
       return later(IPC_DELAY_MS, () => {
-        s.queue.splice(queuedIndex(s, String(args.id)), 1);
+        const [r] = s.queue.splice(queuedIndex(s, String(args.id)), 1);
+        const now = Date.now();
+        s.history.push(ev("cancelled", r, now, { waitedMs: now - r.enqueuedMs }));
         return snapshot(s);
       });
     case "resource_set_capacity":
       return later(IPC_DELAY_MS, () => {
         const capacity = Number(args.capacity);
         if (!(capacity >= 1)) throw "capacity must be at least 1";
-        s.capacity[String(args.name)] = capacity;
+        const name = String(args.name);
+        s.history.push({ tsMs: Date.now(), kind: "capacity_set", resource: name, capacity, prevCapacity: s.capacity[name], needs: {} });
+        s.capacity[name] = capacity;
         return snapshot(s);
       });
     case "resource_kick":
       return later(KICK_DELAY_MS, () => {
         const id = String(args.id);
         if (s.queue.some((r) => r.id === id)) throw `${id} is still queued and holds nothing — cancel it instead`;
-        if (!s.grants.some((g) => g.id === id)) throw `no request ${id} holds a resource`;
-        s.grants = s.grants.filter((g) => g.id !== id);
+        const g = s.grants.find((x) => x.id === id);
+        if (!g) throw `no request ${id} holds a resource`;
+        const now = Date.now();
+        s.history.push(ev("kicked", g, now, { heldMs: now - (g.grantedMs ?? g.enqueuedMs), exitCode: 143 }));
+        s.grants = s.grants.filter((x) => x.id !== id);
         return snapshot(s);
       });
     case "resource_remove":
@@ -220,9 +311,12 @@ export function handleResourceIPC(cmd: string, args: Record<string, unknown>): P
         const using = [...s.grants, ...s.queue].filter((r) => name in r.needs).map((r) => r.id);
         if (using.length) throw `${name} is in use by ${using.join(", ")} — only an idle resource can be removed`;
         if (!(name in s.capacity)) throw `no resource ${name}`;
+        s.history.push({ tsMs: Date.now(), kind: "resource_removed", resource: name, prevCapacity: s.capacity[name], needs: {} });
         delete s.capacity[name];
         return snapshot(s);
       });
+    case "resource_history":
+      return later(IPC_DELAY_MS, () => readHistory(s, (args.query ?? {}) as HistoryQuery));
     default:
       return undefined;
   }

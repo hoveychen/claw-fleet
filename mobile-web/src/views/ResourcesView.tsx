@@ -2,7 +2,8 @@
 // `fleet__job need=[…]`), who holds each one and who is queued for it, read
 // over the relay (`resource_list`). The phone can reorder the queue and cancel
 // a queued request (`resource_move` / `resource_cancel`); kicking a running
-// holder is desktop-only in v1.
+// holder is desktop-only in v1. Below the cards, the queue's event log
+// (`resource_history`).
 //
 // Fullscreen overlay from "More", same z-level as AttentionView; the
 // HistoryLayer wrapping it in App owns the back gesture.
@@ -27,6 +28,7 @@ import { useDelayedFlag } from "../useDelayedFlag";
 import { AppHeader } from "./AppHeader";
 import { EmptyState } from "./EmptyState";
 import { HeaderAction } from "./HeaderAction";
+import { ResourceHistorySection } from "./ResourceHistory";
 import { SkeletonList, Spinner } from "./loading";
 import styles from "./ResourcesView.module.css";
 
@@ -237,6 +239,7 @@ export function ResourcesView({ client, onBack }: Props) {
               )}
             </section>
           ))}
+        {snap && <ResourceHistorySection client={client} resources={cards.map((c) => c.name)} />}
       </div>
     </div>
   );

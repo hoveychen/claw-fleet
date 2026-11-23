@@ -12,6 +12,8 @@
 import type {
   MoveTarget,
   QueuedRequest,
+  ResourceEvent,
+  ResourceEventKind,
   ResourceRequest,
   ResourceSnapshot,
   WaitOn,
@@ -107,4 +109,68 @@ export function waitLines(q: QueuedRequest, snap: ResourceSnapshot): string[] {
       ? t("等 {0}，被 {1} 占用", w.resource, who(w.by))
       : t("{0} 已留给排在前面的 {1}", w.resource, who(w.by)),
   );
+}
+
+// ── History (`resource_history`) ────────────────────────────────────────────
+
+export type EventTone = "neutral" | "accent" | "ok" | "warn" | "bad";
+
+const KIND: Record<ResourceEventKind, [string, EventTone]> = {
+  enqueued: ["入队", "neutral"],
+  granted: ["拿到", "accent"],
+  released: ["释放", "ok"],
+  kicked: ["被踢", "bad"],
+  cancelled: ["已取消", "warn"],
+  timed_out: ["等待超时", "warn"],
+  aborted: ["放弃排队", "warn"],
+  reaped: ["进程消失回收", "bad"],
+  capacity_set: ["容量变更", "neutral"],
+  resource_removed: ["资源删除", "neutral"],
+};
+
+export function eventKind(kind: ResourceEventKind): { label: string; tone: EventTone } {
+  const [zh, tone] = KIND[kind] ?? [String(kind), "neutral"];
+  return { label: t(zh), tone };
+}
+
+/** A stable key for one event (several can share a millisecond). */
+export function eventKey(e: ResourceEvent): string {
+  return `${e.tsMs}:${e.kind}:${e.requestId ?? e.resource ?? ""}`;
+}
+
+/** The event's subject line: the command, or the resource for table changes. */
+export function eventTitle(e: ResourceEvent): string {
+  if (e.resource) {
+    if (e.capacity != null && e.prevCapacity != null) return t("{0} 容量 {1} → {2}", e.resource, e.prevCapacity, e.capacity);
+    if (e.capacity != null) return t("{0} 容量 {1}", e.resource, e.capacity);
+    return e.resource;
+  }
+  const line = (e.command ?? "").split(/\s+/).filter(Boolean).join(" ");
+  if (!line) return e.requestId ?? "";
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+}
+
+/** "gpu, db · 等了 12s · 持有 3m · 退出码 1". */
+export function eventDetails(e: ResourceEvent): string {
+  const needs = Object.entries(e.needs ?? {})
+    .map(([n, u]) => (u === 1 ? n : `${n}:${u}`))
+    .join(", ");
+  return [
+    needs || null,
+    e.waitedMs != null && e.kind !== "enqueued" ? t("等了 {0}", fmtDuration(e.waitedMs)) : null,
+    e.heldMs != null ? t("持有 {0}", fmtDuration(e.heldMs)) : null,
+    e.exitCode != null ? t("退出码 {0}", e.exitCode) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** HH:MM:SS today, MM-DD HH:MM otherwise. */
+export function eventTime(tsMs: number, now = Date.now()): string {
+  const d = new Date(tsMs);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (d.toDateString() === new Date(now).toDateString()) {
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

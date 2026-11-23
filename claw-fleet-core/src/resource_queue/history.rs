@@ -158,19 +158,19 @@ pub struct ResourceHistory {
 /// Filter for [`read_history`].
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct HistoryQuery {
     /// Only events touching this resource.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub resource: Option<String>,
     /// Only events of this request.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub request_id: Option<String>,
     /// Only events strictly older than this (paging cursor).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub before_ms: Option<u64>,
     /// At most this many (default [`DEFAULT_LIMIT`], capped at [`MAX_LIMIT`]).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub limit: Option<usize>,
 }
 

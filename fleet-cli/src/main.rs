@@ -1127,6 +1127,24 @@ pub(crate) enum ResourceCommands {
     /// Delete a resource nothing holds or waits for — e.g. one a typo in
     /// `--need` created.
     Rm { name: String },
+    /// Show what happened in the queue: enqueued, granted, released, kicked,
+    /// cancelled, timed out, reaped, capacity changes. Oldest first.
+    History {
+        /// Only events touching this resource.
+        #[arg(long)]
+        resource: Option<String>,
+        /// Only events of this request id.
+        #[arg(long)]
+        request: Option<String>,
+        /// How many of the newest matching events to show (default 50).
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        /// Only events older than this epoch-millisecond time (paging).
+        #[arg(long)]
+        before: Option<u64>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]

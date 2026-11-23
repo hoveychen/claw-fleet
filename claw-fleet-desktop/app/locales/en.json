@@ -3516,6 +3516,27 @@
     "private_command": "(incognito session's command)",
     "dur_h": "{{h}}h {{m}}m",
     "dur_m": "{{m}}m {{s}}s",
-    "dur_s": "{{s}}s"
+    "dur_s": "{{s}}s",
+    "history": "History",
+    "history_filter": "Filter by resource",
+    "history_all": "All resources",
+    "history_empty": "Nothing recorded yet",
+    "history_more": "Load older",
+    "ev_enqueued": "Queued",
+    "ev_granted": "Granted",
+    "ev_released": "Released",
+    "ev_kicked": "Kicked",
+    "ev_cancelled": "Cancelled",
+    "ev_timed_out": "Timed out",
+    "ev_aborted": "Gave up",
+    "ev_reaped": "Reaped (process gone)",
+    "ev_capacity_set": "Capacity",
+    "ev_resource_removed": "Removed",
+    "ev_capacity_from_to": "capacity {{from}} → {{to}}",
+    "ev_capacity_to": "capacity {{to}}",
+    "ev_waited": "waited {{d}}",
+    "ev_held": "held {{d}}",
+    "ev_exit": "exit {{code}}",
+    "dur_ms": "{{ms}}ms"
   }
 }

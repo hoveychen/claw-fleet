@@ -85,6 +85,20 @@ pub(crate) fn cmd_resource(action: ResourceCommands) {
                 );
             }
         }
+        ResourceCommands::History { resource, request, limit, before, json } => {
+            let h = rq::read_history(&rq::HistoryQuery {
+                resource,
+                request_id: request,
+                before_ms: before,
+                limit: Some(limit),
+            })
+            .unwrap_or_else(|e| fail(e));
+            if json {
+                println!("{}", serde_json::to_string_pretty(&h).unwrap_or_else(|e| fail(e)));
+            } else {
+                print!("{}", rq::render_history(&h));
+            }
+        }
         ResourceCommands::Rm { name } => {
             rq::remove_resource(&name).unwrap_or_else(|e| fail(e));
             println!("ok: resource {name} removed.");
