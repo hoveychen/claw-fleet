@@ -39,11 +39,17 @@
 //! ([`State::schedule`]), so whoever runs it reaches the same answer, and the
 //! queue keeps moving with the desktop app and `fleet serve` both closed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+
+pub mod history;
+use history::Cause;
+pub use history::{
+    read_history, render_history, HistoryQuery, ResourceEvent, ResourceEventKind, ResourceHistory,
+};
 
 /// Set in the environment of a command started under a grant; its value is the
 /// grant's request id. [`check_nested`] reads it.
@@ -393,6 +399,10 @@ struct State {
     /// Request id → the command its grant started ([`record_child`]). An
     /// entry lives exactly as long as its grant (`transact` prunes the rest).
     children: BTreeMap<String, ChildProc>,
+    /// Grants being evicted by [`kick`]: when one of them leaves, the history
+    /// records it as kicked rather than released. Pruned with the grant.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    kicking: BTreeSet<String>,
 }
 
 /// What one scheduling pass did.
@@ -797,6 +807,11 @@ fn load(path: &Path) -> Result<State, String> {
 /// it. Unlike [`crate::atomic_json::with_file_lock`] a lock failure is an
 /// error: an unlocked read-modify-write here can grant one resource twice.
 fn transact<R>(path: &Path, f: impl FnOnce(&mut State) -> R) -> Result<R, String> {
+    transact_as(path, Cause::None, f)
+}
+
+/// [`transact`], telling the history why a request it removes left.
+fn transact_as<R>(path: &Path, cause: Cause, f: impl FnOnce(&mut State) -> R) -> Result<R, String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     }
@@ -820,13 +835,19 @@ fn transact<R>(path: &Path, f: impl FnOnce(&mut State) -> R) -> Result<R, String
     for orphan in state.settle_children(&before, &holder_alive) {
         kill_orphan(&orphan);
     }
+    let held: BTreeSet<String> = state.grants.iter().map(|g| g.id.clone()).collect();
+    state.kicking.retain(|id| held.contains(id));
+    let mut events = Vec::new();
     if state != before {
+        events = history::events_between(&before, &state, &cause, now_ms(), &holder_alive);
         let json = serde_json::to_vec_pretty(&state).map_err(|e| e.to_string())?;
         crate::atomic_json::write_atomic(path, &json)
             .map_err(|e| format!("write {}: {e}", path.display()))?;
     }
     // Closing the file releases the lock.
     drop(lock);
+    // History is written outside the state lock and never fails the call.
+    history::append(path, &events);
     Ok(out)
 }
 
@@ -938,7 +959,7 @@ pub fn cancel_request(id: &str) -> Result<ResourceSnapshot, String> {
 
 fn cancel_request_at(path: &Path, id: &str) -> Result<ResourceSnapshot, String> {
     let now = now_ms();
-    transact(path, |s| {
+    transact_as(path, Cause::Cancelled(id.to_string()), |s| {
         s.schedule(&holder_alive, now);
         s.cancel(id)?;
         s.schedule(&holder_alive, now);
@@ -955,7 +976,7 @@ pub fn set_capacity(name: &str, capacity: u32) -> Result<ResourceSnapshot, Strin
 
 fn set_capacity_at(path: &Path, name: &str, capacity: u32) -> Result<ResourceSnapshot, String> {
     let now = now_ms();
-    transact(path, |s| {
+    transact_as(path, Cause::SetCapacity(name.to_string()), |s| {
         s.schedule(&holder_alive, now);
         s.set_capacity(name, capacity)?;
         s.schedule(&holder_alive, now);
@@ -1006,8 +1027,9 @@ fn kick_at(path: &Path, id: &str, grace: Duration) -> Result<ResourceSnapshot, S
     let now = now_ms();
     let held = transact(path, |s| {
         s.schedule(&holder_alive, now);
-        if let Some(g) = s.grants.iter().find(|g| g.id == id) {
-            return Ok(g.clone());
+        if let Some(g) = s.grants.iter().find(|g| g.id == id).cloned() {
+            s.kicking.insert(id.to_string());
+            return Ok(g);
         }
         if s.queue.iter().any(|r| r.id == id) {
             return Err(format!(
@@ -1281,6 +1303,8 @@ pub struct Grant {
     id: String,
     path: PathBuf,
     released: bool,
+    /// The command's exit code, for the history ([`Grant::release_with_exit`]).
+    exit_code: Option<i32>,
 }
 
 impl Grant {
@@ -1293,15 +1317,22 @@ impl Grant {
         self.release_now();
     }
 
+    /// Release, recording the command's exit code in the history.
+    pub fn release_with_exit(mut self, code: i32) {
+        self.exit_code = Some(code);
+        self.release_now();
+    }
+
     fn release_now(&mut self) {
         if std::mem::replace(&mut self.released, true) {
             return;
         }
         let now = now_ms();
         let id = self.id.clone();
+        let cause = Cause::Released { id: id.clone(), exit_code: self.exit_code };
         // Grant whatever this frees straight away rather than leaving it to
         // the next waiter's poll.
-        let _ = transact(&self.path, |s| {
+        let _ = transact_as(&self.path, cause, |s| {
             s.remove(&id);
             s.schedule(&holder_alive, now);
         });
@@ -1374,7 +1405,7 @@ fn acquire_at(
 
     let leave = |path: &Path| {
         let now = now_ms();
-        let _ = transact(path, |s| {
+        let _ = transact_as(path, Cause::Aborted(id.clone()), |s| {
             s.remove(&id);
             s.schedule(&holder_alive, now);
         });
@@ -1385,7 +1416,8 @@ fn acquire_at(
         let expired = spec.max_wait.is_some_and(|max| waited >= max);
         // Grant-or-give-up is decided in one transaction: checking the deadline
         // outside it could abandon a request that was granted in between.
-        let step = transact(path, |s| {
+        let cause = if expired { Cause::TimedOut(id.clone()) } else { Cause::None };
+        let step = transact_as(path, cause, |s| {
             s.schedule(&holder_alive, now);
             if s.grants.iter().any(|g| g.id == id) {
                 return Step::Granted;
@@ -1411,6 +1443,7 @@ fn acquire_at(
                     id,
                     path: path.to_path_buf(),
                     released: false,
+                    exit_code: None,
                 })
             }
             Ok(Step::Gone) => return Err(AcquireError::Cancelled),
@@ -1569,7 +1602,7 @@ pub fn run_foreground(spec: ForegroundSpec) -> i32 {
         }
     };
     if let Some(g) = grant {
-        g.release();
+        g.release_with_exit(code);
     }
     code
 }
@@ -2282,5 +2315,115 @@ mod tests {
         for c in commands {
             assert_ne!(unsafe { libc::kill(c as libc::pid_t, 0) }, 0, "command {c} outlived the kick");
         }
+    }
+
+    fn kinds(path: &Path, q: &HistoryQuery) -> Vec<(ResourceEventKind, Option<String>)> {
+        let mut h = history::read_history_at(path, q).events;
+        h.reverse();
+        h.into_iter().map(|e| (e.kind, e.request_id.or(e.resource))).collect()
+    }
+
+    #[test]
+    fn history_records_every_transition() {
+        use ResourceEventKind as K;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let s = |x: &str| Some(x.to_string());
+
+        let first = acquire_at(&path, spec("first", &["a"], None), Holder::current(), FAST, |_| false).unwrap();
+        let err = acquire_at(&path, spec("late", &["a"], Some(Duration::from_millis(60))), Holder::current(), FAST, |_| false);
+        assert!(matches!(err, Err(AcquireError::Timeout { .. })));
+        first.release_with_exit(3);
+
+        // A queued request cancelled by hand, and a dead one reaped.
+        let blocker = acquire_at(&path, spec("blocker", &["b"], None), Holder::current(), FAST, |_| false).unwrap();
+        let mut waiter = req("waiter", &["b"]);
+        waiter.holder = Holder::current();
+        transact(&path, |st| st.enqueue(waiter)).unwrap().unwrap();
+        let mut ghost = req("ghost", &["b"]);
+        ghost.holder = Holder { pid: u32::MAX - 1, start_time: Some(1) };
+        transact(&path, |st| st.enqueue(ghost)).unwrap().unwrap();
+        cancel_request_at(&path, "waiter").unwrap();
+        drop(blocker);
+
+        set_capacity_at(&path, "a", 2).unwrap();
+        remove_resource_at(&path, "a").unwrap();
+
+        let all = kinds(&path, &HistoryQuery::default());
+        assert_eq!(
+            all,
+            vec![
+                (K::Enqueued, s("first")),
+                (K::Granted, s("first")),
+                (K::Enqueued, s("late")),
+                (K::TimedOut, s("late")),
+                (K::Released, s("first")),
+                (K::Enqueued, s("blocker")),
+                (K::Granted, s("blocker")),
+                (K::Enqueued, s("waiter")),
+                (K::Enqueued, s("ghost")),
+                // One transaction: the cancel's pass reaps the ghost too.
+                (K::Cancelled, s("waiter")),
+                (K::Reaped, s("ghost")),
+                (K::Released, s("blocker")),
+                (K::CapacitySet, s("a")),
+                (K::ResourceRemoved, s("a")),
+            ]
+        );
+        let h = history::read_history_at(&path, &HistoryQuery::default());
+        let released = h.events.iter().find(|e| e.kind == K::Released && e.request_id == s("first")).unwrap();
+        assert_eq!(released.exit_code, Some(3));
+        assert!(released.held_ms.is_some());
+        let cap = h.events.iter().find(|e| e.kind == K::CapacitySet).unwrap();
+        assert_eq!((cap.prev_capacity, cap.capacity), (Some(1), Some(2)));
+
+        // Filters and paging.
+        let only_b = kinds(&path, &HistoryQuery { resource: s("b"), ..Default::default() });
+        assert_eq!(only_b.len(), 7);
+        let page = history::read_history_at(&path, &HistoryQuery { limit: Some(2), ..Default::default() });
+        assert_eq!(page.events.len(), 2);
+        assert!(page.has_more);
+        assert_eq!(page.events[0].kind, K::ResourceRemoved, "newest first");
+        let one = kinds(&path, &HistoryQuery { request_id: s("late"), ..Default::default() });
+        assert_eq!(one, vec![(K::Enqueued, s("late")), (K::TimedOut, s("late"))]);
+        assert!(render_history(&h).contains("timed_out"));
+    }
+
+    #[test]
+    fn a_kicked_grant_is_recorded_as_kicked() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let g = acquire_at(&path, spec("k", &["a"], None), Holder::current(), FAST, |_| false).unwrap();
+        transact(&path, |s| s.kicking.insert("k".into())).unwrap();
+        g.release_with_exit(143);
+        let h = history::read_history_at(&path, &HistoryQuery::default());
+        assert_eq!(h.events[0].kind, ResourceEventKind::Kicked);
+        assert_eq!(h.events[0].exit_code, Some(143));
+        let st = load(&path).unwrap();
+        assert!(st.kicking.is_empty(), "pruned with the grant");
+    }
+
+    #[test]
+    fn history_rotates_and_reads_both_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let live = history::history_path_for(&path);
+        std::fs::write(&live, vec![b' '; history::ROTATE_BYTES as usize]).unwrap();
+        let g = acquire_at(&path, spec("r", &["a"], None), Holder::current(), FAST, |_| false).unwrap();
+        drop(g);
+        assert!(std::fs::metadata(&live).unwrap().len() < 4096, "rotated");
+        assert!(dir.path().join("history.1.jsonl").exists());
+        assert_eq!(history::read_history_at(&path, &HistoryQuery::default()).events.len(), 3);
+    }
+
+    #[test]
+    fn an_unwritable_history_never_fails_scheduling() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        // A directory where the log file should be: every append fails.
+        std::fs::create_dir_all(history::history_path_for(&path)).unwrap();
+        let g = acquire_at(&path, spec("x", &["a"], None), Holder::current(), FAST, |_| false).unwrap();
+        drop(g);
+        assert!(snapshot_at(&path).unwrap().holders.is_empty());
     }
 }

@@ -290,6 +290,9 @@ pub const RESOURCES_CANCEL: &str = "/resources/cancel";
 pub const RESOURCES_CAPACITY: &str = "/resources/capacity";
 pub const RESOURCES_KICK: &str = "/resources/kick";
 pub const RESOURCES_REMOVE: &str = "/resources/remove";
+/// `POST /resources/history` `{resource?, requestId?, beforeMs?, limit?}` — the
+/// queue's event log, newest first (`resource_queue::history`).
+pub const RESOURCES_HISTORY: &str = "/resources/history";
 /// `GET /host_features` — which optional surfaces this host exposes
 /// ([`crate::feature_flags::HostFeatures`]). Read once at boot by the browser
 /// build so its nav matches what this backend will allow, rather than offering

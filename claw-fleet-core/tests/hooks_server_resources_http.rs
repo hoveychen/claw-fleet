@@ -139,4 +139,17 @@ fn resource_routes_read_adjust_and_refuse_over_http() {
     let (status, snap) = call(port, "POST", routes::RESOURCES_REMOVE, Some(&json!({"name": "db"})));
     assert_eq!(status, 200, "{snap}");
     assert_eq!(snap["resources"], json!([]));
+
+    // The history kept what the table forgot.
+    let (status, h) = call(port, "POST", routes::RESOURCES_HISTORY, Some(&json!({"resource": "db", "limit": 500})));
+    assert_eq!(status, 200, "{h}");
+    let kinds: Vec<&str> = h["events"].as_array().unwrap().iter().map(|e| e["kind"].as_str().unwrap()).collect();
+    for k in ["enqueued", "granted", "released", "cancelled", "capacity_set", "resource_removed"] {
+        assert!(kinds.contains(&k), "{k} missing from {kinds:?}");
+    }
+    assert_eq!(kinds[0], "resource_removed", "newest first");
+    let (status, h) = call(port, "POST", routes::RESOURCES_HISTORY, None);
+    assert_eq!(status, 200, "an empty body reads the newest page: {h}");
+    let (status, _) = call(port, "POST", routes::RESOURCES_HISTORY, Some(&json!({"limit": "x"})));
+    assert_eq!(status, 400);
 }
