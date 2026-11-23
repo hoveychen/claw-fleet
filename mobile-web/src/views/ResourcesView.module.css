@@ -183,6 +183,14 @@
   color: var(--color-accent);
 }
 
+/* A lease whose session Fleet no longer sees working: it is about to go. */
+.idleTag {
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
 .wait {
   font-size: var(--t-meta, 11px);
   color: var(--color-text-secondary);

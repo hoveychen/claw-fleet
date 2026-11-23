@@ -1,6 +1,32 @@
 import { describe, expect, it } from "vitest";
-import type { QueuedRequest } from "../generated/types";
-import { moveTargetFor } from "./ResourcesView";
+import type { TFunction } from "i18next";
+import type { QueuedRequest, ResourceRequest } from "../generated/types";
+import { fmtClock, moveTargetFor, requestLabel } from "./ResourcesView";
+
+/** Returns the inline default, as i18next does for a missing key. */
+const t = ((key: string, def?: string) => def ?? key) as unknown as TFunction;
+
+describe("requestLabel", () => {
+  const base = { id: "x", needs: {}, priority: "normal", enqueuedMs: 0, manual: false, holder: { pid: 0 } } as const;
+  it("names a command by its one-line command", () => {
+    expect(requestLabel({ ...base, kind: "job", command: "cargo   test\n -p core" } as ResourceRequest, t)).toBe("cargo test -p core");
+  });
+  it("names a session lease by its note, not as an incognito command", () => {
+    const lease = { ...base, kind: "lease", command: "", note: "flash  firmware" } as ResourceRequest;
+    expect(requestLabel(lease, t)).toBe("flash firmware");
+    const bare = requestLabel({ ...lease, note: null }, t);
+    expect(bare).not.toBe(requestLabel({ ...base, kind: "job", command: "" } as ResourceRequest, t));
+    expect(requestLabel({ ...lease, note: "y".repeat(100) }, t, 10)).toBe(`${"y".repeat(9)}…`);
+  });
+});
+
+describe("fmtClock", () => {
+  it("shows only the time today and the date on another day", () => {
+    const now = new Date(2026, 10, 23, 15, 0).getTime();
+    expect(fmtClock(new Date(2026, 10, 23, 15, 40).getTime(), now)).toBe("15:40");
+    expect(fmtClock(new Date(2026, 10, 24, 1, 5).getTime(), now)).toBe("11-24 01:05");
+  });
+});
 
 const queue = ["a", "b", "c", "d"].map(
   (id, i) => ({ position: i + 1, request: { id }, waitOn: [] }) as unknown as QueuedRequest,

@@ -6,6 +6,7 @@ import {
   ArrowUpToLine,
   Boxes,
   GripVertical,
+  LockOpen,
   Minus,
   Plus,
   Power,
@@ -169,9 +170,17 @@ export function ResourcesView() {
         <Presence when={kickTarget !== null}>
           {kickTarget && (
             <ConfirmDialog
-              message={t("resources.kick_confirm", "踢掉「{{command}}」？它的命令会被终止（先 SIGTERM，几秒后 SIGKILL），占用的资源交给下一个排队的请求。", {
-                command: shortCommand(kickTarget.command, t),
-              })}
+              message={
+                kickTarget.kind === "lease"
+                  ? t(
+                      "resources.release_lease_confirm",
+                      "替会话 {{session}} 放掉租约「{{what}}」？资源交给下一个排队的请求；会话本身不会被打断，但它不再持有这些资源。",
+                      { session: (kickTarget.sessionId ?? "").slice(0, 8), what: requestLabel(kickTarget, t) },
+                    )
+                  : t("resources.kick_confirm", "踢掉「{{command}}」？它的命令会被终止（先 SIGTERM，几秒后 SIGKILL），占用的资源交给下一个排队的请求。", {
+                      command: shortCommand(kickTarget.command, t),
+                    })
+              }
               busy={busy === `kick:${kickTarget.id}`}
               onCancel={() => setKickTarget(null)}
               onConfirm={async () => {
@@ -345,6 +354,7 @@ function ResourceCard({
             const r = byId.get(id);
             if (!r) return null;
             const kicking = busy === `kick:${id}`;
+            const lease = r.kind === "lease";
             return (
               <li key={id} className={`${styles.row} ${styles.row_holder}`}>
                 <div className={styles.row_main}>
@@ -353,6 +363,14 @@ function ResourceCard({
                     <span className={styles.time}>
                       {t("resources.held_for", "已持有 {{d}}", { d: fmtDuration(now - (r.grantedMs ?? r.enqueuedMs), t) })}
                     </span>
+                    {lease && r.idleSinceMs != null && (
+                      <span
+                        className={`${styles.tag} ${styles.tag_warn}`}
+                        title={t("resources.lease_idle_hint", "Fleet 看不到这个会话还在干活（没在跑、没挂 watch、没有等答复的卡、没登记接力），一段时间后租约会自动释放")}
+                      >
+                        {t("resources.lease_idle", "会话已无活动 {{d}}，即将自动释放", { d: fmtDuration(now - r.idleSinceMs, t) })}
+                      </span>
+                    )}
                     <NeedChips r={r} except={res.name} />
                   </div>
                 </div>
@@ -361,10 +379,14 @@ function ResourceCard({
                   className={`${styles.action} ${styles.danger}`}
                   disabled={kicking}
                   onClick={() => onKick(r)}
-                  title={t("resources.kick_hint", "终止这条命令，把资源交给下一个")}
+                  title={
+                    lease
+                      ? t("resources.release_lease_hint", "替这个会话放掉租约，把资源交给下一个")
+                      : t("resources.kick_hint", "终止这条命令，把资源交给下一个")
+                  }
                 >
-                  {kicking ? <Spinner size={10} /> : <Power size={12} />}
-                  {t("resources.kick", "踢掉")}
+                  {kicking ? <Spinner size={10} /> : lease ? <LockOpen size={12} /> : <Power size={12} />}
+                  {lease ? t("resources.release_lease", "替放") : t("resources.kick", "踢掉")}
                 </button>
               </li>
             );
@@ -417,9 +439,25 @@ function ResourceCard({
                         {r.priority === "high" ? t("resources.priority_high", "高优先级") : t("resources.priority_low", "低优先级")}
                       </span>
                     )}
+                    {r.afterMs != null && r.afterMs > now && (
+                      <span
+                        className={styles.tag}
+                        title={t("resources.after_hint", "到这个时间之前不会拿到，也不占位，后面已经能开始的请求照常先走")}
+                      >
+                        {t("resources.after", "{{time}} 之后", { time: fmtClock(r.afterMs, now) })}
+                      </span>
+                    )}
+                    {(r.skips ?? 0) > 0 && (
+                      <span
+                        className={styles.tag}
+                        title={t("resources.skips_hint", "它等其他资源时，排在后面的请求先用了它预留的空闲资源；次数用完后不再让")}
+                      >
+                        {t("resources.skips", "已被插空 {{n}} 次", { n: r.skips })}
+                      </span>
+                    )}
                     <NeedChips r={r} except={res.name} />
                   </div>
-                  {q.waitOn.map((w) => (
+                  {q.waitOn.filter((w) => w.reason !== "after").map((w) => (
                     <div key={w.resource} className={styles.wait_on}>
                       {describeWait(w, byId, queued, t)}
                     </div>
@@ -461,12 +499,22 @@ function RequestLine({ r, onOpenSession }: { r: ResourceRequest; onOpenSession: 
   const ws = r.workspace ? r.workspace.split("/").filter(Boolean).pop() : null;
   return (
     <div className={styles.line}>
-      <span className={styles.kind}>
-        {r.kind === "job" ? t("resources.kind_job", "job") : t("resources.kind_fg", "前台")}
+      <span className={`${styles.kind}${r.kind === "lease" ? ` ${styles.kind_lease}` : ""}`}>
+        {r.kind === "job"
+          ? t("resources.kind_job", "job")
+          : r.kind === "lease"
+            ? t("resources.kind_lease", "租约")
+            : t("resources.kind_fg", "前台")}
       </span>
-      <code className={styles.command} title={r.command || undefined}>
-        {shortCommand(r.command, t)}
-      </code>
+      {r.kind === "lease" ? (
+        <span className={styles.note} title={r.note || undefined}>
+          {requestLabel(r, t)}
+        </span>
+      ) : (
+        <code className={styles.command} title={r.command || undefined}>
+          {shortCommand(r.command, t)}
+        </code>
+      )}
       {ws && (
         <span className={styles.ws} title={r.workspace ?? undefined}>
           {ws}
@@ -507,8 +555,16 @@ function describeWait(
   t: TFunction,
 ): string {
   if (w.reason === "busy") {
-    const who = w.by.map((id) => shortCommand(byId.get(id)?.command ?? id, t, 28)).join("、");
+    const who = w.by
+      .map((id) => {
+        const r = byId.get(id);
+        return r ? requestLabel(r, t, 28) : id;
+      })
+      .join("、");
     return t("resources.wait_busy", "等 {{res}}：被 {{who}} 占着", { res: w.resource, who: who || "—" });
+  }
+  if (w.reason === "after") {
+    return t("resources.wait_after", "等 {{res}}：还没到它定的开始时间", { res: w.resource });
   }
   const ahead = w.by
     .map((id) => {
@@ -542,7 +598,27 @@ export function moveTargetFor(
 function shortCommand(cmd: string, t: TFunction, max = 72): string {
   const one = cmd.split(/\s+/).filter(Boolean).join(" ");
   if (!one) return t("resources.private_command", "（隐身会话的命令）");
-  return one.length > max ? `${one.slice(0, max - 1)}…` : one;
+  return clip(one, max);
+}
+
+function clip(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/** What a row calls a request: its command, or — for a session lease, which
+ *  runs no command — what the session said it holds it for. */
+export function requestLabel(r: ResourceRequest, t: TFunction, max = 72): string {
+  if (r.kind !== "lease") return shortCommand(r.command, t, max);
+  const note = (r.note ?? "").split(/\s+/).filter(Boolean).join(" ");
+  return note ? clip(note, max) : t("resources.lease_no_note", "（没写用途）");
+}
+
+/** HH:MM today, MM-DD HH:MM on another day. */
+export function fmtClock(ms: number, now: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return d.toDateString() === new Date(now).toDateString() ? hm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
 }
 
 function fmtDuration(ms: number, t: TFunction): string {

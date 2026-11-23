@@ -42,6 +42,9 @@ function req(
   };
 }
 
+/** A session lease (`fleet resource take` / `queue`): no command, no process. */
+const LEASE: Partial<ResourceRequest> = { kind: "lease", holder: { pid: 0 } };
+
 interface MockState {
   capacity: Record<string, number>;
   holders: ResourceRequest[];
@@ -56,10 +59,26 @@ function initial(): MockState {
   const e2e = req("job-91c2", { "staging-db": 1 }, "pnpm test:e2e --project=chromium", "/Users/boss/workspace/shop-web", 6 * MIN, {
     grantedMs: now - 5 * MIN,
   });
+  const board = req("l-4b7e", { "esp32-board": 1 }, "", "/Users/boss/workspace/esp-os", 24 * MIN, {
+    ...LEASE,
+    grantedMs: now - 22 * MIN,
+    sessionId: "5d2e8f14-7a3c-4b09-9e61-2f8c0d4b7a19",
+    note: "flash firmware and run the chat e2e on the board",
+    idleSinceMs: now - 40_000,
+  });
   return {
-    capacity: { gpu: 1, "staging-db": 1, cargo: 2 },
-    holders: [train, e2e],
+    capacity: { gpu: 1, "staging-db": 1, cargo: 2, "esp32-board": 1 },
+    holders: [train, e2e, board],
     queue: [
+      {
+        request: req("l-9c21", { "esp32-board": 1 }, "", "/Users/boss/workspace/esp-os", 4 * MIN, {
+          ...LEASE,
+          sessionId: "4e9c2a71-d6b3-4085-a1f7-93c5e0b8d24f",
+          note: "overnight battery soak",
+          afterMs: now + 35 * MIN,
+        }),
+        waitOn: [{ resource: "esp32-board", reason: "after", by: [] }],
+      },
       {
         request: req("job-a810", { gpu: 1 }, "python eval.py --ckpt runs/latest", "/Users/boss/workspace/vision-lab", 18 * MIN, {
           priority: "high",
@@ -134,6 +153,23 @@ export function mockResourceCancel(id: string): ResourceSnapshot {
   return mockResourceSnapshot();
 }
 
+/** `resource_lease_release`: a lease held or queued, released on its
+ *  session's behalf. Anything else is refused, as core does. */
+export function mockResourceLeaseRelease(id: string): ResourceSnapshot {
+  const now = Date.now();
+  const held = state.holders.find((h) => h.id === id && h.kind === "lease");
+  if (held) {
+    history.push(ev("kicked", held, now, { pid: undefined, heldMs: now - (held.grantedMs ?? held.enqueuedMs) }));
+    state = { ...state, holders: state.holders.filter((h) => h.id !== id) };
+    return mockResourceSnapshot();
+  }
+  const queued = state.queue.find((q) => q.request.id === id && q.request.kind === "lease");
+  if (!queued) throw new Error(`no lease ${id}`);
+  history.push(ev("cancelled", queued.request, now, { pid: undefined, waitedMs: now - queued.request.enqueuedMs }));
+  state = { ...state, queue: state.queue.filter((q) => q.request.id !== id) };
+  return mockResourceSnapshot();
+}
+
 // ── History ──────────────────────────────────────────────────────────────────
 // An hour of finished work plus the live table's own enqueue/grant events,
 // so the history card has every kind of row to show.
@@ -146,9 +182,11 @@ function ev(kind: ResourceEventKind, r: ResourceRequest, tsMs: number, extra: Pa
     requestKind: r.kind,
     needs: r.needs,
     priority: r.priority,
-    pid: r.holder.pid,
+    pid: r.kind === "lease" ? undefined : r.holder.pid,
+    sessionId: r.sessionId,
     command: r.command || undefined,
     workspace: r.workspace,
+    note: r.note,
     ...extra,
   };
 }
@@ -175,6 +213,26 @@ function seedHistory(): ResourceEvent[] {
   done(req("job-5d90", { "staging-db": 1 }, "pnpm db:seed", "/Users/boss/workspace/shop-web", 40 * MIN), 5 * MIN, 0, "timed_out");
   done(req("job-5e22", { gpu: 1 }, "python infer.py --batch 8", ws, 35 * MIN), 0, 3 * MIN, "reaped");
   done(req("job-5f63", { cargo: 1 }, "cargo build --release", "/Users/boss/workspace/search-api", 30 * MIN), 20_000, 0, "cancelled");
+  // A lease carried to the successor at a handoff, then released by it; and
+  // one whose session ended without letting go.
+  const from = "7c41d9e2-b03a-4e5f-8d17-3a9e2c6b0f58";
+  const to = "1f8a6c3d-92e4-4b70-a5d1-c0e7b4f29a63";
+  const handed = req("l-3f10", { "esp32-board": 1 }, "", "/Users/boss/workspace/esp-os", 62 * MIN, {
+    ...LEASE,
+    sessionId: from,
+    note: "flash v0.9 firmware and run the wake-word e2e",
+  });
+  const leaseEv = (kind: ResourceEventKind, tsMs: number, extra: Partial<ResourceEvent> = {}) =>
+    ev(kind, handed, tsMs, { pid: undefined, sessionId: from, ...extra });
+  out.push(leaseEv("enqueued", handed.enqueuedMs), leaseEv("granted", handed.enqueuedMs, { waitedMs: 0 }));
+  out.push(leaseEv("transferred", handed.enqueuedMs + 9 * MIN, { sessionId: to, fromSessionId: from }));
+  out.push(leaseEv("released", handed.enqueuedMs + 16 * MIN, { sessionId: to, heldMs: 16 * MIN }));
+  const lapsed = req("l-6a02", { "esp32-board": 1 }, "", "/Users/boss/workspace/esp-os", 44 * MIN, {
+    ...LEASE,
+    sessionId: "e93b1c07-4d2a-4f86-b5e0-8a1c6d2f9b34",
+    note: "bisect the audio driver regression",
+  });
+  done(lapsed, 0, 14 * MIN, "reaped");
   for (const h of state.holders) {
     out.push(ev("enqueued", h, h.enqueuedMs));
     out.push(ev("granted", h, h.grantedMs ?? h.enqueuedMs, { waitedMs: (h.grantedMs ?? h.enqueuedMs) - h.enqueuedMs }));

@@ -147,6 +147,7 @@ const TONE: Record<ResourceEventKind, string> = {
   timed_out: "warn",
   aborted: "warn",
   reaped: "bad",
+  transferred: "accent",
   capacity_set: "neutral",
   resource_removed: "neutral",
 };
@@ -169,6 +170,8 @@ export function kindLabel(kind: ResourceEventKind, t: TFunction): string {
       return t("resources.ev_aborted", "放弃排队");
     case "reaped":
       return t("resources.ev_reaped", "已回收");
+    case "transferred":
+      return t("resources.ev_transferred", "转交");
     case "capacity_set":
       return t("resources.ev_capacity_set", "容量变更");
     case "resource_removed":
@@ -182,6 +185,10 @@ function EventRow({ e }: { e: ResourceEvent }) {
     .map(([n, u]) => (u === 1 ? n : `${n}:${u}`))
     .join(", ");
   const cmd = (e.command ?? "").split(/\s+/).filter(Boolean).join(" ");
+  const lease = e.requestKind === "lease";
+  const reapedHint = lease
+    ? t("resources.ev_reaped_lease_hint", "持有它的会话已结束，租约被自动收回")
+    : t("resources.ev_reaped_hint", "持有者进程已消失，资源被自动收回");
   return (
     <li className={styles.row}>
       <span className={styles.when} title={new Date(e.tsMs).toLocaleString()}>
@@ -190,12 +197,17 @@ function EventRow({ e }: { e: ResourceEvent }) {
       <span
         className={styles.kind}
         data-tone={TONE[e.kind] ?? "neutral"}
-        title={e.kind === "reaped" ? t("resources.ev_reaped_hint", "持有者进程已消失，资源被自动收回") : undefined}
+        title={e.kind === "reaped" ? reapedHint : undefined}
       >
         {kindLabel(e.kind, t)}
       </span>
       <div className={styles.main}>
-        {e.resource ? (
+        {lease ? (
+          <span className={styles.what}>
+            {t("resources.ev_lease", "租约")}
+            {e.note ? ` · ${e.note}` : ""}
+          </span>
+        ) : e.resource ? (
           <span className={styles.what}>
             <code>{e.resource}</code>
             {e.capacity != null &&
@@ -218,6 +230,9 @@ function EventRow({ e }: { e: ResourceEvent }) {
             <span className={e.exitCode === 0 ? undefined : styles.bad_exit}>
               {t("resources.ev_exit", "退出码 {{code}}", { code: e.exitCode })}
             </span>
+          )}
+          {e.kind === "transferred" && e.fromSessionId && (
+            <span className={styles.sid}>{e.fromSessionId.slice(0, 8)} →</span>
           )}
           {e.sessionId && <span className={styles.sid}>{e.sessionId.slice(0, 8)}</span>}
           {e.pid != null && <span className={styles.pid}>pid {e.pid}</span>}

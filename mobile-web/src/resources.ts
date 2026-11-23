@@ -1,6 +1,7 @@
 // Pure view logic for the resource-queue page (ResourcesView): grouping the
 // snapshot per resource, the move targets behind the up/down/top buttons, and
-// the "waiting on X held by Y" lines. Kept out of the component so it can be
+// the "waiting on X held by Y" lines, and how a session lease (no command,
+// held across turns) reads in a row. Kept out of the component so it can be
 // unit-tested without a DOM (mobile-web has no jsdom).
 //
 // The backend keeps ONE global queue (`resource_queue.rs`); a resource card
@@ -79,11 +80,28 @@ export function fmtDuration(ms: number): string {
   return h % 24 ? `${d}d ${h % 24}h` : `${d}d`;
 }
 
-/** One-line command for a row; an incognito session's job has none. */
+/** One-line command for a row; an incognito session's job has none. A session
+ *  lease runs no command: it reads as "lease · <what the session said>". */
 export function commandLabel(r: ResourceRequest, max = 80): string {
+  if (r.kind === "lease") {
+    const note = (r.note ?? "").split(/\s+/).filter(Boolean).join(" ");
+    return clip(t("租约 · {0}", note || t("没写用途")), max);
+  }
   const line = r.command.split(/\s+/).filter(Boolean).join(" ");
   if (!line) return t("（隐身任务，命令不显示）");
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+  return clip(line, max);
+}
+
+function clip(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/** HH:MM today, MM-DD HH:MM on another day. */
+export function clockTime(tsMs: number, now = Date.now()): string {
+  const d = new Date(tsMs);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return d.toDateString() === new Date(now).toDateString() ? hm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`;
 }
 
 export function workspaceName(path: string | null | undefined): string | null {
@@ -104,11 +122,18 @@ export function waitLines(q: QueuedRequest, snap: ResourceSnapshot): string[] {
   for (const w of snap.queue) byId.set(w.request.id, w.request);
   const who = (ids: string[]) =>
     ids.map((id) => (byId.has(id) ? commandLabel(byId.get(id)!, 40) : id)).join(t("、"));
-  return q.waitOn.map((w: WaitOn) =>
-    w.reason === "busy"
-      ? t("等 {0}，被 {1} 占用", w.resource, who(w.by))
-      : t("{0} 已留给排在前面的 {1}", w.resource, who(w.by)),
-  );
+  const lines = q.waitOn
+    .filter((w) => w.reason !== "after")
+    .map((w: WaitOn) =>
+      w.reason === "busy"
+        ? t("等 {0}，被 {1} 占用", w.resource, who(w.by))
+        : t("{0} 已留给排在前面的 {1}", w.resource, who(w.by)),
+    );
+  // `after` comes once per resource; one line says it for all of them.
+  if (q.waitOn.some((w) => w.reason === "after") && q.request.afterMs != null) {
+    lines.unshift(t("{0} 之后才会拿到，之前不占位", clockTime(q.request.afterMs, snap.nowMs)));
+  }
+  return lines;
 }
 
 // ── History (`resource_history`) ────────────────────────────────────────────
@@ -124,6 +149,7 @@ const KIND: Record<ResourceEventKind, [string, EventTone]> = {
   timed_out: ["等待超时", "warn"],
   aborted: ["放弃排队", "warn"],
   reaped: ["已回收", "bad"],
+  transferred: ["转交", "accent"],
   capacity_set: ["容量变更", "neutral"],
   resource_removed: ["资源删除", "neutral"],
 };
@@ -145,9 +171,13 @@ export function eventTitle(e: ResourceEvent): string {
     if (e.capacity != null) return t("{0} 容量 {1}", e.resource, e.capacity);
     return e.resource;
   }
+  if (e.requestKind === "lease") {
+    const note = (e.note ?? "").split(/\s+/).filter(Boolean).join(" ");
+    return clip(note ? t("租约 · {0}", note) : t("租约"), 80);
+  }
   const line = (e.command ?? "").split(/\s+/).filter(Boolean).join(" ");
   if (!line) return e.requestId ?? "";
-  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+  return clip(line, 80);
 }
 
 /** "gpu, db · 等了 12s · 持有 3m · 退出码 1". */
@@ -155,8 +185,14 @@ export function eventDetails(e: ResourceEvent): string {
   const needs = Object.entries(e.needs ?? {})
     .map(([n, u]) => (u === 1 ? n : `${n}:${u}`))
     .join(", ");
+  const sid = (s: string | null | undefined) => (s ?? "").slice(0, 8);
   return [
     needs || null,
+    e.kind === "transferred" && e.fromSessionId && e.sessionId
+      ? t("会话 {0} → {1}", sid(e.fromSessionId), sid(e.sessionId))
+      : e.requestKind === "lease" && e.sessionId
+        ? t("会话 {0}", sid(e.sessionId))
+        : null,
     e.waitedMs != null && e.kind !== "enqueued" ? t("等了 {0}", fmtDuration(e.waitedMs)) : null,
     e.heldMs != null ? t("持有 {0}", fmtDuration(e.heldMs)) : null,
     e.exitCode != null ? t("退出码 {0}", e.exitCode) : null,

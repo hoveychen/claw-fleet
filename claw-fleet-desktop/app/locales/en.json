@@ -3575,6 +3575,21 @@
     "ev_waited": "waited {{d}}",
     "ev_held": "held {{d}}",
     "ev_exit": "exit {{code}}",
-    "dur_ms": "{{ms}}ms"
+    "dur_ms": "{{ms}}ms",
+    "kind_lease": "lease",
+    "lease_no_note": "(no purpose given)",
+    "lease_idle": "session idle {{d}}, releasing soon",
+    "lease_idle_hint": "Fleet sees nothing keeping this session going (no running process, watch, pending card or registered handoff); the lease is released after a grace period",
+    "release_lease": "Release",
+    "release_lease_hint": "Release this lease on the session's behalf and hand its resources on",
+    "release_lease_confirm": "Release the lease “{{what}}” on behalf of session {{session}}? Its resources go to the next queued request; the session itself is not interrupted, but it no longer holds them.",
+    "after": "after {{time}}",
+    "after_hint": "Not granted before this time and reserves nothing until then, so requests behind it that can start go first",
+    "skips": "passed {{n}}×",
+    "skips_hint": "While it waited for other resources, requests behind it used the free ones it had reserved; once the allowance is used up it holds its place",
+    "wait_after": "waiting for {{res}}: its start time has not come",
+    "ev_transferred": "Handed on",
+    "ev_lease": "Lease",
+    "ev_reaped_lease_hint": "The session holding it ended; the lease was taken back"
   }
 }

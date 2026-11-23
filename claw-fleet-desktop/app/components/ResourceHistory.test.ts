@@ -1,6 +1,29 @@
 import { describe, expect, it } from "vitest";
-import type { ResourceEvent } from "../generated/types";
-import { eventKey, mergeHistory } from "./ResourceHistory";
+import type { TFunction } from "i18next";
+import type { ResourceEvent, ResourceEventKind } from "../generated/types";
+import zh from "../locales/zh.json";
+import en from "../locales/en.json";
+import { eventKey, kindLabel, mergeHistory } from "./ResourceHistory";
+
+describe("kindLabel", () => {
+  const kinds: ResourceEventKind[] = [
+    "enqueued", "granted", "released", "kicked", "cancelled", "timed_out",
+    "aborted", "reaped", "transferred", "capacity_set", "resource_removed",
+  ];
+  it("labels every event kind, with a key in both locales", () => {
+    const keys: string[] = [];
+    const t = ((key: string, def?: string) => {
+      keys.push(key);
+      return def ?? key;
+    }) as unknown as TFunction;
+    for (const k of kinds) expect(kindLabel(k, t)).toBeTruthy();
+    for (const key of keys) {
+      const leaf = key.replace(/^resources\./, "");
+      expect((zh as { resources: Record<string, string> }).resources[leaf], `zh ${key}`).toBeTruthy();
+      expect((en as { resources: Record<string, string> }).resources[leaf], `en ${key}`).toBeTruthy();
+    }
+  });
+});
 
 const e = (tsMs: number, kind: ResourceEvent["kind"] = "granted", requestId = `r${tsMs}`): ResourceEvent =>
   ({ tsMs, kind, requestId }) as ResourceEvent;

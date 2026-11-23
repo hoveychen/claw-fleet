@@ -1192,6 +1192,19 @@ const DICT: Record<string, string> = {
   "等了 {0}": "waited {0}",
   "持有 {0}": "held {0}",
   "退出码 {0}": "exit {0}",
+  // ── Session leases (`fleet resource take` / `queue`) ──
+  租约: "Lease",
+  "租约 · {0}": "Lease · {0}",
+  没写用途: "no purpose given",
+  转交: "Handed on",
+  "会话 {0}": "session {0}",
+  "会话 {0} → {1}": "session {0} → {1}",
+  "会话已无活动 {0}，即将自动释放": "Session idle {0}, releasing soon",
+  替会话放掉租约: "Release on the session's behalf",
+  "替会话 {0} 放掉「{1}」？资源交给下一个排队的请求；会话本身不会被打断，但它不再持有这些资源。":
+    "Release \"{1}\" on behalf of session {0}? Its resources go to the next queued request; the session itself is not interrupted, but it no longer holds them.",
+  "已被插空 {0} 次": "Passed {0}×",
+  "{0} 之后才会拿到，之前不占位": "Not before {0}; reserves nothing until then",
   // ── Job card under a `fleet__job run` step (JobCard) ──
   "读取状态…": "Loading status…",
   "排队第 {0} 位 / 共 {1}": "Queued #{0} of {1}",

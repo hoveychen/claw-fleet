@@ -2766,6 +2766,7 @@ pub fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "resource_list" => serve_resource_list(params),
         "resource_move" => serve_resource_move(params),
         "resource_cancel" => serve_resource_cancel(params),
+        "resource_lease_release" => serve_resource_lease_release(params),
         "resource_history" => serve_resource_history(params),
         // ── HTTP tunnel ─────────────────────────────────────────────────────
         // The desktop web bundle's fetches, replayed against this host's own
@@ -4429,6 +4430,21 @@ fn serve_resource_cancel(params: &Value) -> Result<Value, String> {
     serde_json::to_value(snap).map_err(|e| e.to_string())
 }
 
+/// `{ id }` → the table afterwards. Releases a session lease (held or queued)
+/// on its session's behalf — the phone's way out when a session forgot to let
+/// go of a board. Only leases: stopping a running command stays a desktop
+/// action (`resource_kick`), and core refuses any id that is not a lease.
+fn serve_resource_lease_release(params: &Value) -> Result<Value, String> {
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or("missing id")?;
+    crate::resource_queue::lease::release_id(id, true)?;
+    let snap = crate::resource_queue::snapshot()?;
+    serde_json::to_value(snap).map_err(|e| e.to_string())
+}
+
 /// `{ resource?, requestId?, beforeMs?, limit? }` → the queue's event log,
 /// newest first.
 fn serve_resource_history(params: &Value) -> Result<Value, String> {
@@ -5592,6 +5608,38 @@ mod tests {
             assert_eq!(h["events"][0]["kind"], "capacity_set");
             assert_eq!(h["events"][0]["capacity"], 2);
             assert!(serve_request("resource_history", &json!({ "limit": "x" })).is_err());
+        });
+    }
+
+    #[test]
+    fn resource_lease_release_frees_a_lease_and_refuses_anything_else() {
+        with_temp_home(|| {
+            use crate::resource_queue::lease::{self, LeaseSpec};
+            let spec = |session: &str| LeaseSpec {
+                session_id: session.into(),
+                needs: [("board".to_string(), 1)].into_iter().collect(),
+                priority: Default::default(),
+                after_ms: None,
+                note: Some("flash firmware".into()),
+                workspace: None,
+            };
+            let held = lease::take(&spec("sess-a")).unwrap();
+            let lease::LeaseStatus::Held { lease: a } = held else { panic!("{held:?}") };
+            let queued = lease::queue(&spec("sess-b")).unwrap();
+            assert!(matches!(queued, lease::LeaseStatus::Queued { .. }), "{queued:?}");
+
+            // Released on A's behalf: the board goes straight to B.
+            let snap = serve_request("resource_lease_release", &json!({ "id": a.id })).unwrap();
+            assert_eq!(snap["holders"].as_array().unwrap().len(), 1, "{snap}");
+            assert_eq!(snap["holders"][0]["sessionId"], "sess-b");
+            assert_eq!(snap["holders"][0]["kind"], "lease");
+            let h = serve_request("resource_history", &json!({ "requestId": a.id })).unwrap();
+            assert_eq!(h["events"][0]["kind"], "kicked", "{h}");
+
+            // Not a lease (or gone): refused, nothing changes.
+            let err = serve_request("resource_lease_release", &json!({ "id": a.id })).unwrap_err();
+            assert!(err.contains("no lease"), "{err}");
+            assert!(serve_request("resource_lease_release", &json!({})).is_err());
         });
     }
 

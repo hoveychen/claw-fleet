@@ -1112,6 +1112,7 @@ fn spawn_successor_by_source(
 /// without starting a real `claude` process. The spawner's first argument is
 /// the predecessor's `agent_source`, so tests can assert the relay routes to
 /// the right tool.
+#[cfg(test)]
 fn consume_and_spawn_in<S>(
     pending_dir: &Path,
     chain_dir: &Path,

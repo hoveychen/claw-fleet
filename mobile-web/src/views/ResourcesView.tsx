@@ -1,15 +1,16 @@
 // Resource queue: the desktop machine's named resources (`fleet resource`,
 // `fleet__job need=[…]`), who holds each one and who is queued for it, read
-// over the relay (`resource_list`). The phone can reorder the queue and cancel
-// a queued request (`resource_move` / `resource_cancel`); kicking a running
-// holder is desktop-only in v1. Below the cards, the queue's event log
+// over the relay (`resource_list`). The phone can reorder the queue, cancel a
+// queued request (`resource_move` / `resource_cancel`) and release a session
+// lease on its session's behalf (`resource_lease_release`); kicking a running
+// command stays desktop-only. Below the cards, the queue's event log
 // (`resource_history`).
 //
 // Fullscreen overlay from "More", same z-level as AttentionView; the
 // HistoryLayer wrapping it in App owns the back gesture.
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronsUp, ChevronUp, Layers, RefreshCw, WifiOff, X } from "lucide-react";
+import { ChevronDown, ChevronsUp, ChevronUp, Layers, LockOpen, RefreshCw, WifiOff, X } from "lucide-react";
 
 import type { MoveTarget, QueuedRequest, ResourceRequest, ResourceSnapshot } from "../generated/types";
 import { t } from "../i18n";
@@ -83,7 +84,11 @@ export function ResourcesView({ client, onBack }: Props) {
   }, [refresh]);
 
   const act = useCallback(
-    async (id: string, method: "resource_move" | "resource_cancel", params: Record<string, unknown>) => {
+    async (
+      id: string,
+      method: "resource_move" | "resource_cancel" | "resource_lease_release",
+      params: Record<string, unknown>,
+    ) => {
       if (!client) return;
       setBusyId(id);
       setActionError(null);
@@ -105,6 +110,16 @@ export function ResourcesView({ client, onBack }: Props) {
   const cancel = async (q: QueuedRequest) => {
     const ok = await confirm(t("取消排队中的「{0}」？它不会再运行。", commandLabel(q.request, 60)));
     if (ok) await act(q.request.id, "resource_cancel", {});
+  };
+  const releaseLease = async (r: ResourceRequest) => {
+    const ok = await confirm(
+      t(
+        "替会话 {0} 放掉「{1}」？资源交给下一个排队的请求；会话本身不会被打断，但它不再持有这些资源。",
+        (r.sessionId ?? "").slice(0, 8),
+        commandLabel(r, 60),
+      ),
+    );
+    if (ok) await act(r.id, "resource_lease_release", {});
   };
 
   const cards = snap ? resourceCards(snap) : [];
@@ -163,7 +178,15 @@ export function ResourcesView({ client, onBack }: Props) {
                 <div className={styles.block}>
                   <div className={styles.blockLabel}>{t("持有中")}</div>
                   {card.holders.map((r) => (
-                    <HolderRow key={r.id} r={r} resource={card.name} nowMs={snap.nowMs} />
+                    <HolderRow
+                      key={r.id}
+                      r={r}
+                      resource={card.name}
+                      nowMs={snap.nowMs}
+                      busy={busyId === r.id}
+                      locked={busyId !== null}
+                      onRelease={() => void releaseLease(r)}
+                    />
                   ))}
                 </div>
               )}
@@ -189,6 +212,9 @@ export function ResourcesView({ client, onBack }: Props) {
                               <span className={styles.priority} data-priority={q.request.priority}>
                                 {q.request.priority === "high" ? t("高优先级") : t("低优先级")}
                               </span>
+                            )}
+                            {(q.request.skips ?? 0) > 0 && (
+                              <span className={styles.priority}>{t("已被插空 {0} 次", q.request.skips ?? 0)}</span>
                             )}
                           </div>
                           {waitLines(q, snap).map((line) => (
@@ -263,7 +289,22 @@ function RequestMeta({ r, resource }: { r: ResourceRequest; resource: string }) 
   );
 }
 
-function HolderRow({ r, resource, nowMs }: { r: ResourceRequest; resource: string; nowMs: number }) {
+function HolderRow({
+  r,
+  resource,
+  nowMs,
+  busy,
+  locked,
+  onRelease,
+}: {
+  r: ResourceRequest;
+  resource: string;
+  nowMs: number;
+  busy: boolean;
+  locked: boolean;
+  onRelease: () => void;
+}) {
+  const lease = r.kind === "lease";
   return (
     <div className={styles.row}>
       <div className={styles.rowMain}>
@@ -274,8 +315,21 @@ function HolderRow({ r, resource, nowMs }: { r: ResourceRequest; resource: strin
         <RequestMeta r={r} resource={resource} />
         <div className={styles.meta}>
           {t("已占用 {0}", fmtDuration(nowMs - (r.grantedMs ?? r.enqueuedMs)))}
+          {lease && r.sessionId && <span>{t("会话 {0}", r.sessionId.slice(0, 8))}</span>}
+          {lease && r.idleSinceMs != null && (
+            <span className={styles.idleTag}>
+              {t("会话已无活动 {0}，即将自动释放", fmtDuration(nowMs - r.idleSinceMs))}
+            </span>
+          )}
         </div>
       </div>
+      {lease && (
+        <div className={styles.controls}>
+          <IconButton label={t("替会话放掉租约")} danger disabled={locked} onClick={onRelease}>
+            {busy ? <Spinner size={14} /> : <LockOpen size={16} />}
+          </IconButton>
+        </div>
+      )}
     </div>
   );
 }

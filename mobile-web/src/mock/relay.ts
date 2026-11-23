@@ -56,7 +56,14 @@ import {
 
 import scenes from "../../../scripts/site/fixtures/scenes.json";
 import { localizeMock } from "./demoLocale";
-import { mockJobRecord, mockResourceCancel, mockResourceHistory, mockResourceMove, mockResourceSnapshot } from "./resources";
+import {
+  mockJobRecord,
+  mockResourceCancel,
+  mockResourceHistory,
+  mockResourceLeaseRelease,
+  mockResourceMove,
+  mockResourceSnapshot,
+} from "./resources";
 import type { HistoryQuery, MoveTarget } from "../generated/types";
 
 /** Host continuation switches (`resume_settings`); `set_resume_settings` merges into it. */
@@ -270,6 +277,8 @@ export class MockRelayClient extends RelayClient {
         return mockResourceMove(String(params?.id), params?.target as MoveTarget);
       case "resource_cancel":
         return mockResourceCancel(String(params?.id));
+      case "resource_lease_release":
+        return mockResourceLeaseRelease(String(params?.id));
       case "resource_history":
         return mockResourceHistory((params ?? {}) as HistoryQuery);
       // dsh has no transcript file, so both of these are RPC-only — which is
