@@ -363,8 +363,9 @@ hand-roll lock files or ask other sessions by message** — that is how sessions
 deadlock. A nested request for an undeclared resource is refused.\n\
 - **Across commands/turns** (dev board, device) → `fleet resource take --need \
 board --note … --session <id>` (busy: `queue`, it prints the watch to wait \
-with), then `release --session <id>`; freed when the session ends, kept across \
-handoff.\n\
+with), then `release --session <id>`; take/queue more to add, `--need X` on \
+release frees part (a deadlocking add is refused); freed when the session \
+ends, kept across handoff.\n\
 - Pick the scheduling relay by *need*: **repeat periodically (cron) → \
 `fleet loop`** (alias `fleet cron`; durable, a fresh session each interval); \
 **fire once later → `fleet schedule`** (`--at`/`--in`); **wait for an event \
