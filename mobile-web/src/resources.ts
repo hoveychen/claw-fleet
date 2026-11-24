@@ -180,14 +180,33 @@ export function eventTitle(e: ResourceEvent): string {
   return clip(line, 80);
 }
 
-/** "gpu, db · 等了 12s · 持有 3m · 退出码 1". */
-export function eventDetails(e: ResourceEvent): string {
-  const needs = Object.entries(e.needs ?? {})
+/** "gpu, board:2" — a needs map as the CLI prints it. */
+export function fmtNeeds(needs: Record<string, number | undefined> | null | undefined): string {
+  return Object.entries(needs ?? {})
     .map(([n, u]) => (u === 1 ? n : `${n}:${u}`))
     .join(", ");
+}
+
+/** What the session behind a queued lease piece already holds (other lease
+ *  pieces of the same session): the piece waits for more on top of that. */
+export function sessionHolds(r: ResourceRequest, holders: ResourceRequest[]): string {
+  if (r.kind !== "lease" || !r.sessionId) return "";
+  const held: Record<string, number> = {};
+  for (const h of holders) {
+    if (h.kind !== "lease" || h.sessionId !== r.sessionId || h.id === r.id) continue;
+    for (const [n, u] of Object.entries(h.needs)) held[n] = (held[n] ?? 0) + (u ?? 0);
+  }
+  return fmtNeeds(held);
+}
+
+/** "gpu, db · 等了 12s · 持有 3m · 退出码 1". */
+export function eventDetails(e: ResourceEvent): string {
+  const needs = fmtNeeds(e.needs);
+  const kept = fmtNeeds(e.kept);
   const sid = (s: string | null | undefined) => (s ?? "").slice(0, 8);
   return [
     needs || null,
+    kept ? t("仍持有 {0}", kept) : null,
     e.kind === "transferred" && e.fromSessionId && e.sessionId
       ? t("会话 {0} → {1}", sid(e.fromSessionId), sid(e.sessionId))
       : e.requestKind === "lease" && e.sessionId

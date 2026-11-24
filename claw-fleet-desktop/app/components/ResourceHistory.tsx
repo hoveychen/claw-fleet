@@ -184,6 +184,9 @@ function EventRow({ e }: { e: ResourceEvent }) {
   const needs = Object.entries(e.needs ?? {})
     .map(([n, u]) => (u === 1 ? n : `${n}:${u}`))
     .join(", ");
+  const kept = Object.entries(e.kept ?? {})
+    .map(([n, u]) => (u === 1 ? n : `${n}:${u}`))
+    .join(", ");
   const cmd = (e.command ?? "").split(/\s+/).filter(Boolean).join(" ");
   const lease = e.requestKind === "lease";
   const reapedHint = lease
@@ -222,6 +225,11 @@ function EventRow({ e }: { e: ResourceEvent }) {
         )}
         <span className={styles.meta}>
           {needs && <span className={styles.needs}>{needs}</span>}
+          {kept && (
+            <span title={t("resources.ev_kept_hint", "只放掉了一部分，租约里其余的资源仍由这个会话持有")}>
+              {t("resources.ev_kept", "仍持有 {{needs}}", { needs: kept })}
+            </span>
+          )}
           {e.waitedMs != null && e.kind !== "enqueued" && (
             <span>{t("resources.ev_waited", "等了 {{d}}", { d: fmtDur(e.waitedMs, t) })}</span>
           )}

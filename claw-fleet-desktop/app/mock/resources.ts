@@ -113,6 +113,13 @@ function leaseHandedOn(t0: number): ResourceEvent[] {
     lease("enqueued", t0),
     lease("granted", t0, { waitedMs: 0 }),
     lease("transferred", t0 + 9 * 60_000, { sessionId: to, fromSessionId: from }),
+    // Part of it let go first (`release --need`): the board is kept.
+    lease("released", t0 + 12 * 60_000, {
+      sessionId: to,
+      heldMs: 12 * 60_000,
+      needs: { "pixel-phone": 1 },
+      kept: { "esp32-board": 1 },
+    }),
     lease("released", t0 + 16 * 60_000, { sessionId: to, heldMs: 16 * 60_000 }),
   ];
 }

@@ -21,6 +21,7 @@ import {
   moveTargets,
   resourceCards,
   unitsOf,
+  sessionHolds,
   waitLines,
   workspaceName,
 } from "../resources";
@@ -215,6 +216,9 @@ export function ResourcesView({ client, onBack }: Props) {
                             )}
                             {(q.request.skips ?? 0) > 0 && (
                               <span className={styles.priority}>{t("已被插空 {0} 次", q.request.skips ?? 0)}</span>
+                            )}
+                            {sessionHolds(q.request, snap.holders) && (
+                              <span className={styles.priority}>{t("已持有 {0}", sessionHolds(q.request, snap.holders))}</span>
                             )}
                           </div>
                           {waitLines(q, snap).map((line) => (
