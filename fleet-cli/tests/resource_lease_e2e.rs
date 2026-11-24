@@ -93,6 +93,52 @@ fn take_queue_mine_release_between_two_sessions() {
 }
 
 #[test]
+fn append_partial_release_and_a_refused_deadlock() {
+    let home = short_home();
+    let h = home.path();
+    // A takes the round board, then adds the waveshare one on top.
+    let t = run(h, Some(A), GRACE, &["resource", "take", "--need", "round", "--note", "flash round"]);
+    assert_eq!(code(&t), 0, "{}", text(&t));
+    let t = run(h, Some(A), GRACE, &["resource", "take", "--need", "wave", "--note", "flash wave"]);
+    assert_eq!(code(&t), 0, "{}", text(&t));
+    let (c, st) = mine(h, A, GRACE);
+    assert_eq!(c, 0, "{st:?}");
+    let LeaseStatus::Held { leases, needs, .. } = &st else { panic!("{st:?}") };
+    assert_eq!(leases.len(), 2);
+    assert_eq!(rq::format_needs(needs), "round, wave");
+
+    // B waits for round; A lets go of round only: B holds it, A keeps wave.
+    assert_eq!(code(&run(h, Some(B), GRACE, &["resource", "queue", "--need", "round"])), 0);
+    let rel = run(h, Some(A), GRACE, &["resource", "release", "--need", "round"]);
+    assert_eq!(code(&rel), 0, "{}", text(&rel));
+    assert!(text(&rel).contains("still holding [wave]"), "{}", text(&rel));
+    assert_eq!(mine(h, B, GRACE).0, 0);
+    let (c, st) = mine(h, A, GRACE);
+    assert_eq!(c, 0, "{st:?}");
+    assert!(st.holds(&rq::parse_needs(&["wave".to_string()]).unwrap()), "{st:?}");
+
+    // A queues for round on top of wave (waits for B): exit 1 from mine.
+    let q = run(h, Some(A), GRACE, &["resource", "queue", "--need", "round"]);
+    assert_eq!(code(&q), 0, "{}", text(&q));
+    assert_eq!(mine(h, A, GRACE).0, 1);
+    // B waiting for wave while holding round would deadlock: refused.
+    let q = run(h, Some(B), GRACE, &["resource", "queue", "--need", "wave"]);
+    assert_eq!(code(&q), 1, "{}", text(&q));
+    assert!(text(&q).contains("would deadlock"), "{}", text(&q));
+    // So is a command of B's that would wait for wave.
+    let r = run(h, Some(B), GRACE, &["resource", "run", "--need", "wave", "--max-wait", "5s", "--", "true"]);
+    assert_ne!(code(&r), 0, "{}", text(&r));
+    assert!(text(&r).contains("would deadlock"), "{}", text(&r));
+
+    // Refused waits never reach the table.
+    let ls = text(&run(h, None, GRACE, &["resource", "ls"]));
+    assert!(ls.contains("· holds [wave]"), "{ls}");
+    assert!(!ls.contains("bbbbbbbb  \n      needs wave"), "{ls}");
+    let hist = text(&run(h, None, GRACE, &["resource", "history"]));
+    assert_eq!(hist.matches("enqueued").count(), 4, "{hist}");
+}
+
+#[test]
 fn a_lease_queued_for_later_holds_nobody_up() {
     let home = short_home();
     let h = home.path();
@@ -153,7 +199,7 @@ fn kick_releases_a_lease_on_its_sessions_behalf() {
     let home = short_home();
     let h = home.path();
     let take = run(h, Some(A), GRACE, &["resource", "take", "--need", "board", "--json"]);
-    let LeaseStatus::Held { lease } = serde_json::from_slice(&take.stdout).unwrap() else {
+    let LeaseStatus::Held { lease, .. } = serde_json::from_slice(&take.stdout).unwrap() else {
         panic!("{}", text(&take))
     };
     let kick = run(h, None, GRACE, &["resource", "kick", &lease.id]);

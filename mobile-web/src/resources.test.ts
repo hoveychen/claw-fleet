@@ -11,6 +11,7 @@ import {
   fmtDuration,
   moveTargets,
   resourceCards,
+  sessionHolds,
   waitLines,
   workspaceName,
 } from "./resources";
@@ -213,5 +214,23 @@ describe("history rows", () => {
     const now = new Date(2026, 10, 23, 15, 0, 0).getTime();
     expect(eventTime(new Date(2026, 10, 23, 9, 5, 7).getTime(), now)).toBe("09:05:07");
     expect(eventTime(new Date(2026, 10, 20, 9, 5, 7).getTime(), now)).toBe("11-20 09:05");
+  });
+});
+
+describe("lease pieces", () => {
+  const lease = (id: string, sessionId: string, needs: Record<string, number>): ResourceRequest => ({
+    ...req(id, needs, ""),
+    kind: "lease",
+    sessionId,
+  });
+  it("sessionHolds lists what the queued piece's session already holds", () => {
+    const holders = [lease("a", "s1", { round: 1 }), lease("b", "s2", { desk: 1 }), req("j", { gpu: 1 })];
+    expect(sessionHolds(lease("q", "s1", { wave: 1 }), holders)).toBe("round");
+    expect(sessionHolds(lease("q", "s3", { wave: 1 }), holders)).toBe("");
+    expect(sessionHolds(req("j2", { round: 1 }), holders)).toBe("");
+  });
+  it("eventDetails shows what a partial release kept", () => {
+    const e: ResourceEvent = { tsMs: 0, kind: "released", requestKind: "lease", needs: { round: 1 }, kept: { wave: 1 } };
+    expect(eventDetails(e)).toContain("wave");
   });
 });

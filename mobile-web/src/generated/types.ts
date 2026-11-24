@@ -696,7 +696,8 @@ fromSessionId?: string | null,
 waitedMs?: number | null, 
 heldMs?: number | null, 
 exitCode?: number | null, 
-resource?: string | null, capacity?: number | null, prevCapacity?: number | null, };
+resource?: string | null, capacity?: number | null, prevCapacity?: number | null, 
+kept?: { [key in string]: number }, };
 
 export type ResourceHistory = { events: Array<ResourceEvent>, 
 hasMore: boolean, };

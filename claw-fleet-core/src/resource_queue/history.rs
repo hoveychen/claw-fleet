@@ -110,6 +110,10 @@ pub struct ResourceEvent {
     pub capacity: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub prev_capacity: Option<u32>,
+    /// On a lease piece released in part: what it still holds (or, for a
+    /// queued piece, still waits for). `needs` is what was let go of.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+    pub kept: BTreeMap<String, u32>,
 }
 
 impl ResourceEvent {
@@ -133,6 +137,7 @@ impl ResourceEvent {
             resource: None,
             capacity: None,
             prev_capacity: None,
+            kept: BTreeMap::new(),
         }
     }
 
@@ -197,9 +202,10 @@ pub(super) enum Cause {
     #[default]
     None,
     Released { id: String, exit_code: Option<i32> },
-    /// A session lease left the table: released (held) or unqueued (queued);
-    /// `by_other` — on its session's behalf, logged as kicked.
-    LeaseLeft { id: String, by_other: bool },
+    /// Session lease pieces left the table or shrank: released (held) or
+    /// unqueued (queued); `by_other` — on its session's behalf, logged as
+    /// kicked.
+    LeaseLeft { ids: Vec<String>, by_other: bool },
     Cancelled(String),
     TimedOut(String),
     Aborted(String),
@@ -243,7 +249,7 @@ pub(super) fn events_between(
         } else {
             match cause {
                 Cause::Released { id, .. } if hinted(id) => K::Released,
-                Cause::LeaseLeft { id, by_other } if hinted(id) => match (was_granted, by_other) {
+                Cause::LeaseLeft { ids, by_other } if ids.iter().any(|id| hinted(id)) => match (was_granted, by_other) {
                     (false, _) => K::Cancelled,
                     (true, true) => K::Kicked,
                     (true, false) => K::Released,
@@ -268,6 +274,44 @@ pub(super) fn events_between(
             e.waited_ms = Some(now.saturating_sub(r.enqueued_ms));
         }
         out.push(e);
+    }
+
+    // Lease pieces released in part: shrank, but stay.
+    if let Cause::LeaseLeft { ids, by_other } = cause {
+        for r in after.grants.iter().chain(&after.queue) {
+            if !ids.contains(&r.id) {
+                continue;
+            }
+            let Some((was_granted, prev)) = find(before, &r.id) else { continue };
+            if prev.needs == r.needs {
+                continue;
+            }
+            let gone: BTreeMap<String, u32> = prev
+                .needs
+                .iter()
+                .filter_map(|(name, &n)| {
+                    let k = n.saturating_sub(r.needs.get(name).copied().unwrap_or(0));
+                    (k > 0).then(|| (name.clone(), k))
+                })
+                .collect();
+            if gone.is_empty() {
+                continue;
+            }
+            let kind = match (was_granted, by_other) {
+                (false, _) => K::Cancelled,
+                (true, true) => K::Kicked,
+                (true, false) => K::Released,
+            };
+            let mut e = ResourceEvent::of(now, kind, r);
+            e.needs = gone;
+            e.kept = r.needs.clone();
+            if was_granted {
+                e.held_ms = prev.granted_ms.map(|g| now.saturating_sub(g));
+            } else {
+                e.waited_ms = Some(now.saturating_sub(prev.enqueued_ms));
+            }
+            out.push(e);
+        }
     }
 
     // Moved to another session.
@@ -424,6 +468,9 @@ pub fn render_history(h: &ResourceHistory) -> String {
         let mut line = format!("{when}  {kind:<16}");
         if let Some(id) = &e.request_id {
             line.push_str(&format!(" {id}  [{}]", format_needs(&e.needs)));
+            if !e.kept.is_empty() {
+                line.push_str(&format!("  kept [{}]", format_needs(&e.kept)));
+            }
         }
         if let Some(name) = &e.resource {
             line.push_str(&format!(" {name}"));

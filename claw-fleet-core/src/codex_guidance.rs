@@ -356,7 +356,9 @@ whether they use it** — that is how sessions deadlock, each believing the \
 other holds it. A nested request for an undeclared resource is refused.\n\
 - **Across commands/turns** (dev board, device) → `fleet resource take --need \
 board --note …` (busy: `queue`, it prints the watch to wait with), then \
-`release`; held per session, freed when it ends, kept across handoff.\n\
+`release`; take/queue more to add, `release --need X` frees part (a \
+deadlocking add is refused); held per session, freed when it ends, kept \
+across handoff.\n\
 - Pick the scheduling relay by *need*, not by the name: **repeat periodically \
 (cron) → `fleet loop`** (CLI alias `fleet cron`; Fleet-managed, durable, spawns \
 a fresh LOCAL session each interval so local creds are present — don't mistake \

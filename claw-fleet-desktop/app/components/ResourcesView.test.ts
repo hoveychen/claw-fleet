@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TFunction } from "i18next";
 import type { QueuedRequest, ResourceRequest } from "../generated/types";
-import { fmtClock, moveTargetFor, requestLabel } from "./ResourcesView";
+import { fmtClock, moveTargetFor, requestLabel, sessionHolds } from "./ResourcesView";
 
 /** Returns the inline default, as i18next does for a missing key. */
 const t = ((key: string, def?: string) => def ?? key) as unknown as TFunction;
@@ -47,5 +47,18 @@ describe("moveTargetFor", () => {
     expect(moveTargetFor(queue, "b", "c", false)).toBeNull();
     expect(moveTargetFor(queue, "c", "b", true)).toBeNull();
     expect(moveTargetFor(queue, "zz", "b", true)).toBeNull();
+  });
+});
+
+describe("sessionHolds", () => {
+  const lease = (id: string, sessionId: string, needs: Record<string, number>, grantedMs: number | null) =>
+    ({ id, kind: "lease", sessionId, needs, priority: "normal", enqueuedMs: 0, grantedMs, manual: false, holder: { pid: 0 }, command: "" }) as ResourceRequest;
+  it("sums the granted pieces of the queued piece's session", () => {
+    const pending = lease("q", "s1", { wave: 1 }, null);
+    const byId = new Map(
+      [lease("a", "s1", { round: 1 }, 1), lease("b", "s1", { gpu: 2 }, 1), lease("c", "s2", { desk: 1 }, 1), pending].map((r) => [r.id, r]),
+    );
+    expect(sessionHolds(pending, byId)).toBe("round, gpu:2");
+    expect(sessionHolds(lease("x", "s3", { wave: 1 }, null), byId)).toBe("");
   });
 });

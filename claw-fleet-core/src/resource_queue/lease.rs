@@ -8,9 +8,11 @@
 //! * `take` — grant now or refuse (nothing is left queued);
 //! * `queue` — wait in line, optionally not before `--after`; a waiter polls
 //!   `mine` (exit 0 once it holds) from `fleet watch --until`;
-//! * `release` / `unqueue` — let go / leave the line;
-//! * a session holds at most one lease: asking for more while holding some is
-//!   refused (release first, then take everything at once), as for commands.
+//! * `release` / `unqueue` — let go (of everything, or `--need` just some) /
+//!   leave the line;
+//! * a session holding some may take or queue for more (an append): each
+//!   addition is its own lease piece, and a wait for more while holding some
+//!   is refused when it could close a deadlock cycle ([`super::deadlock`]).
 //!
 //! **Ending.** A lease is dropped once its session has been found with nothing
 //! keeping it going — no Fleet-known process, live watch, schedule or loop,
@@ -191,14 +193,38 @@ pub struct LeaseSpec {
     pub workspace: Option<String>,
 }
 
+/// A session's queued lease piece, while the session holds others.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct PendingLease {
+    pub lease: ResourceRequest,
+    pub position: usize,
+    pub wait_on: Vec<WaitOn>,
+}
+
 /// A session's lease, as `mine` / `take` / `queue` report it.
+///
+/// A session may hold several lease pieces (each take or granted queue that
+/// added resources is its own piece) and wait for at most one more.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum LeaseStatus {
-    /// The session holds it.
-    Held { lease: ResourceRequest },
-    /// The session waits in the queue.
+    /// The session holds `needs` (every piece together); `lease` is the
+    /// oldest piece, kept for readers of the one-lease shape. `pending`: a
+    /// piece it waits for on top.
+    #[serde(rename_all = "camelCase")]
+    Held {
+        lease: ResourceRequest,
+        #[serde(default)]
+        leases: Vec<ResourceRequest>,
+        #[serde(default)]
+        needs: BTreeMap<String, u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pending: Option<PendingLease>,
+    },
+    /// The session waits in the queue and holds nothing.
     #[serde(rename_all = "camelCase")]
     Queued { lease: ResourceRequest, position: usize, wait_on: Vec<WaitOn> },
     /// `take` only: not available now, and nothing was queued.
@@ -209,19 +235,59 @@ pub enum LeaseStatus {
 }
 
 impl LeaseStatus {
+    /// Holds something and waits for nothing more.
     pub fn is_held(&self) -> bool {
-        matches!(self, Self::Held { .. })
+        matches!(self, Self::Held { pending: None, .. })
+    }
+
+    /// Waits in the queue — for a first lease, or for more on top of one.
+    pub fn waiting(&self) -> bool {
+        matches!(self, Self::Queued { .. } | Self::Held { pending: Some(_), .. })
+    }
+
+    /// Everything the session holds.
+    pub fn held_needs(&self) -> BTreeMap<String, u32> {
+        match self {
+            Self::Held { needs, lease, .. } if needs.is_empty() => lease.needs.clone(),
+            Self::Held { needs, .. } => needs.clone(),
+            _ => BTreeMap::new(),
+        }
+    }
+
+    /// The session holds all of `needs`.
+    pub fn holds(&self, needs: &BTreeMap<String, u32>) -> bool {
+        matches!(self, Self::Held { .. }) && holds_all(&self.held_needs(), needs)
     }
 
     /// One line for the CLI and the MCP tool.
     pub fn describe(&self) -> String {
+        let piece = |l: &ResourceRequest| {
+            format!(
+                "lease {} for [{}]{}",
+                l.id,
+                format_needs(&l.needs),
+                l.note.as_deref().map(|n| format!(" ({n})")).unwrap_or_default()
+            )
+        };
         match self {
-            Self::Held { lease } => format!(
-                "holding lease {} for [{}]{}",
-                lease.id,
-                format_needs(&lease.needs),
-                lease.note.as_deref().map(|n| format!(" ({n})")).unwrap_or_default()
-            ),
+            Self::Held { lease, leases, needs, pending } => {
+                let mut s = if leases.len() > 1 {
+                    let parts: Vec<String> = leases.iter().map(piece).collect();
+                    format!("holding [{}] as {}", format_needs(needs), parts.join(", "))
+                } else {
+                    format!("holding {}", piece(lease))
+                };
+                if let Some(p) = pending {
+                    s.push_str(&format!(
+                        "; queued (#{}) as lease {} for [{}] on top — waiting on {}",
+                        p.position,
+                        p.lease.id,
+                        format_needs(&p.lease.needs),
+                        describe_wait(&p.wait_on)
+                    ));
+                }
+                s
+            }
             Self::Queued { lease, position, wait_on } => format!(
                 "queued (#{position}) as lease {} for [{}] — waiting on {}",
                 lease.id,
@@ -237,16 +303,83 @@ impl LeaseStatus {
     }
 }
 
+/// One lease piece [`release`] let go of, whole or in part.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct ReleasedPart {
+    pub id: String,
+    /// What was let go of.
+    pub needs: BTreeMap<String, u32>,
+    /// Held (released), or only queued (left the queue).
+    pub was_held: bool,
+    /// The piece is gone; otherwise it was shrunk and keeps the rest.
+    pub whole: bool,
+}
+
 /// What [`release`] let go of.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct LeaseRelease {
-    /// The lease removed — held, or only queued (`was_held` false).
-    pub lease: Option<ResourceRequest>,
-    pub was_held: bool,
+    pub released: Vec<ReleasedPart>,
+    /// What the session still holds.
+    pub kept: BTreeMap<String, u32>,
+    /// What the session still waits for.
+    pub still_queued: BTreeMap<String, u32>,
     /// Requests granted by the same pass, i.e. who got the resources next.
     pub handed_to: Vec<ResourceRequest>,
+}
+
+impl LeaseRelease {
+    fn nothing() -> Self {
+        Self {
+            released: Vec::new(),
+            kept: BTreeMap::new(),
+            still_queued: BTreeMap::new(),
+            handed_to: Vec::new(),
+        }
+    }
+
+    /// One line for the CLI and the MCP tool.
+    pub fn describe(&self) -> String {
+        if self.released.is_empty() {
+            return "ok: nothing of that is held or queued by this session — nothing to do.".into();
+        }
+        let parts: Vec<String> = self
+            .released
+            .iter()
+            .map(|p| {
+                let what = match (p.was_held, p.whole) {
+                    (true, true) => "released",
+                    (true, false) => "released (rest of the lease kept)",
+                    (false, true) => "left the queue",
+                    (false, false) => "no longer queued for",
+                };
+                format!("{} [{}] {what}", p.id, format_needs(&p.needs))
+            })
+            .collect();
+        let mut s = format!("ok: {}", parts.join("; "));
+        if !self.kept.is_empty() {
+            s.push_str(&format!("; still holding [{}]", format_needs(&self.kept)));
+        }
+        if !self.still_queued.is_empty() {
+            s.push_str(&format!("; still queued for [{}]", format_needs(&self.still_queued)));
+        }
+        if !self.handed_to.is_empty() {
+            let to: Vec<String> = self
+                .handed_to
+                .iter()
+                .map(|r| match (&r.session_id, r.is_lease()) {
+                    (Some(s), true) => format!("{} (session {})", r.id, &s[..s.len().min(8)]),
+                    _ => r.id.clone(),
+                })
+                .collect();
+            s.push_str(&format!("; now granted: {}", to.join(", ")));
+        }
+        s.push('.');
+        s
+    }
 }
 
 /// A fresh lease id (`l…`, so it reads apart from command requests' `r…`).
@@ -276,38 +409,35 @@ fn resolve(state: &State, session: &str) -> String {
     }
 }
 
-fn find_lease<'a>(state: &'a State, session: &str) -> Option<(bool, &'a ResourceRequest)> {
+/// The session's queued lease piece (the first, should a handoff have
+/// brought it a second).
+fn queued_piece<'a>(state: &'a State, session: &str) -> Option<&'a ResourceRequest> {
     state
-        .grants
+        .queue
         .iter()
         .find(|r| r.is_lease() && r.session_id.as_deref() == Some(session))
-        .map(|r| (true, r))
-        .or_else(|| {
-            state
-                .queue
-                .iter()
-                .find(|r| r.is_lease() && r.session_id.as_deref() == Some(session))
-                .map(|r| (false, r))
-        })
 }
 
 /// The session's lease as it stands. Call after a scheduling pass.
 fn status_in(state: &State, session: &str, now: u64) -> LeaseStatus {
-    match find_lease(state, session) {
-        Some((true, r)) => LeaseStatus::Held { lease: r.clone() },
-        Some((false, r)) => {
-            let snap = state.snapshot(now);
-            let q = snap.queue.into_iter().find(|q| q.request.id == r.id);
-            match q {
-                Some(q) => LeaseStatus::Queued {
-                    lease: q.request,
-                    position: q.position,
-                    wait_on: q.wait_on,
-                },
-                None => LeaseStatus::None,
-            }
-        }
-        None => LeaseStatus::None,
+    let held: Vec<ResourceRequest> = state.session_leases(session).into_iter().cloned().collect();
+    let queued = queued_piece(state, session).and_then(|r| {
+        state
+            .snapshot(now)
+            .queue
+            .into_iter()
+            .find(|q| q.request.id == r.id)
+            .map(|q| PendingLease { lease: q.request, position: q.position, wait_on: q.wait_on })
+    });
+    match (held.first().cloned(), queued) {
+        (Some(lease), pending) => LeaseStatus::Held {
+            lease,
+            needs: state.session_holds(session),
+            leases: held,
+            pending,
+        },
+        (None, Some(p)) => LeaseStatus::Queued { lease: p.lease, position: p.position, wait_on: p.wait_on },
+        (None, None) => LeaseStatus::None,
     }
 }
 
@@ -315,14 +445,49 @@ fn holds_all(held: &BTreeMap<String, u32>, needs: &BTreeMap<String, u32>) -> boo
     needs.iter().all(|(n, &u)| held.get(n).copied().unwrap_or(0) >= u)
 }
 
-fn refuse_more(lease: &ResourceRequest, needs: &BTreeMap<String, u32>) -> String {
+/// What of `wanted` the session does not hold yet. Asking for more units of a
+/// resource it holds some of is refused: two pieces of one resource would let
+/// a session wait for a resource while holding it.
+fn extra_needs(
+    held: &BTreeMap<String, u32>,
+    wanted: &BTreeMap<String, u32>,
+) -> Result<BTreeMap<String, u32>, String> {
+    let mut out = BTreeMap::new();
+    for (name, &n) in wanted {
+        match held.get(name).copied().unwrap_or(0) {
+            0 => {
+                out.insert(name.clone(), n);
+            }
+            h if h >= n => {}
+            h => {
+                return Err(format!(
+                    "this session holds {name}:{h} and asked for {name}:{n} — growing a held \
+                     resource is not supported; release {name} and take {name}:{n}"
+                ))
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn overlaps(a: &BTreeMap<String, u32>, b: &BTreeMap<String, u32>) -> bool {
+    a.keys().any(|k| b.contains_key(k))
+}
+
+/// Why waiting for `want` is refused: the cycle it would close.
+fn refuse_deadlock(state: &State, session: &str, want: &BTreeMap<String, u32>, cycle: &[super::deadlock::Step]) -> String {
+    let held = state.session_holds(session);
+    let holding = if held.is_empty() {
+        "while this session's commands wait".to_string()
+    } else {
+        format!("while this session holds [{}]", format_needs(&held))
+    };
     format!(
-        "this session already holds lease {} for [{}] and asked for [{}]. Waiting for more \
-         while holding some is how deadlocks start — release it first, then take everything \
-         at once.",
-        lease.id,
-        format_needs(&lease.needs),
-        format_needs(needs)
+        "refused: waiting for [{}] {holding} would deadlock — {}. Release what you hold first \
+         (fleet resource release --need …) and queue for everything at once, or wait until the \
+         other side is done.",
+        format_needs(want),
+        super::deadlock::explain(cycle)
     )
 }
 
@@ -356,9 +521,12 @@ fn require_session(session: &str) -> Result<(), String> {
 }
 
 /// Take `spec.needs` now, or refuse ([`LeaseStatus::Busy`]) without queueing.
-/// Already holding all of it is a no-op; a session already queued is granted
-/// out of turn if the queue allows it (its `--after` is ignored), else stays
-/// queued as it was.
+///
+/// Already holding all of it is a no-op. What the session already holds is
+/// kept; the rest is taken as a new lease piece (an append) — refused if,
+/// with the session's other waits, it would close a deadlock cycle. A session
+/// queued for some of it is granted that queued piece out of turn if the queue
+/// allows it (its `--after` is ignored), else stays queued as it was.
 pub fn take(spec: &LeaseSpec) -> Result<LeaseStatus, String> {
     take_at(&state_path()?, spec)
 }
@@ -370,40 +538,50 @@ pub(crate) fn take_at(path: &Path, spec: &LeaseSpec) -> Result<LeaseStatus, Stri
         s.schedule(&super::holder_alive, now);
         s.check_fits(&spec.needs)?;
         let session = spec.session_id.as_str();
-        match find_lease(s, session).map(|(g, r)| (g, r.clone())) {
-            Some((true, held)) => {
-                if holds_all(&held.needs, &spec.needs) {
-                    return Ok(LeaseStatus::Held { lease: held });
-                }
-                return Err(refuse_more(&held, &spec.needs));
-            }
-            Some((false, queued)) => {
-                let backup = s.clone();
-                if let Some(r) = s.queue.iter_mut().find(|r| r.id == queued.id) {
-                    r.after_ms = None;
-                    if r.needs != spec.needs {
-                        r.needs = spec.needs.clone();
-                        r.skips = 0;
-                    }
-                    if spec.note.is_some() {
-                        r.note = spec.note.clone();
-                    }
-                }
-                s.schedule(&super::holder_alive, now);
-                if s.grants.iter().any(|g| g.id == queued.id) {
-                    return Ok(status_in(s, session, now));
-                }
-                *s = backup;
-                return Ok(status_in(s, session, now));
-            }
-            None => {}
+        let want = extra_needs(&s.session_holds(session), &spec.needs)?;
+        if want.is_empty() {
+            return Ok(status_in(s, session, now));
         }
         let backup = s.clone();
-        let req = new_request(&LeaseSpec { after_ms: None, ..spec.clone() }, now);
+        let queued = queued_piece(s, session).filter(|q| overlaps(&q.needs, &want)).map(|q| q.id.clone());
+        if let Some(qid) = queued {
+            if let Some(r) = s.queue.iter_mut().find(|r| r.id == qid) {
+                r.after_ms = None;
+                let mut merged = r.needs.clone();
+                for (name, &n) in &want {
+                    let e = merged.entry(name.clone()).or_insert(0);
+                    *e = (*e).max(n);
+                }
+                if r.needs != merged {
+                    r.needs = merged;
+                    r.skips = 0;
+                }
+                if spec.note.is_some() {
+                    r.note = spec.note.clone();
+                }
+            }
+            s.schedule(&super::holder_alive, now);
+            if s.grants.iter().any(|g| g.id == qid) {
+                if let Some(cycle) = super::deadlock::cycle_through(s, &qid) {
+                    let msg = refuse_deadlock(&backup, session, &want, &cycle);
+                    *s = backup;
+                    return Err(msg);
+                }
+                return Ok(status_in(s, session, now));
+            }
+            *s = backup;
+            return Ok(status_in(s, session, now));
+        }
+        let req = new_request(&LeaseSpec { after_ms: None, needs: want.clone(), ..spec.clone() }, now);
         let id = req.id.clone();
         s.enqueue(req)?;
         s.schedule(&super::holder_alive, now);
         if s.grants.iter().any(|g| g.id == id) {
+            if let Some(cycle) = super::deadlock::cycle_through(s, &id) {
+                let msg = refuse_deadlock(&backup, session, &want, &cycle);
+                *s = backup;
+                return Err(msg);
+            }
             return Ok(status_in(s, session, now));
         }
         let wait_on = s
@@ -419,7 +597,10 @@ pub(crate) fn take_at(path: &Path, spec: &LeaseSpec) -> Result<LeaseStatus, Stri
 }
 
 /// Queue for `spec.needs` (granted at once if nothing stands in the way).
-/// Queueing again updates the request in place, keeping its place in line.
+///
+/// What the session already holds is kept, and it queues for the rest — a
+/// wait on top of what it holds, refused if it could close a deadlock cycle.
+/// Queueing again updates the queued piece in place, keeping its place in line.
 pub fn queue(spec: &LeaseSpec) -> Result<LeaseStatus, String> {
     queue_at(&state_path()?, spec)
 }
@@ -431,22 +612,21 @@ pub(crate) fn queue_at(path: &Path, spec: &LeaseSpec) -> Result<LeaseStatus, Str
         s.schedule(&super::holder_alive, now);
         s.check_fits(&spec.needs)?;
         let session = spec.session_id.as_str();
-        match find_lease(s, session).map(|(g, r)| (g, r.clone())) {
-            Some((true, held)) => {
-                if holds_all(&held.needs, &spec.needs) {
-                    return Ok(LeaseStatus::Held { lease: held });
-                }
-                return Err(refuse_more(&held, &spec.needs));
-            }
-            Some((false, queued)) => {
-                for name in spec.needs.keys() {
+        let want = extra_needs(&s.session_holds(session), &spec.needs)?;
+        if want.is_empty() {
+            return Ok(status_in(s, session, now));
+        }
+        let backup = s.clone();
+        let id = match queued_piece(s, session).map(|q| q.id.clone()) {
+            Some(qid) => {
+                for name in want.keys() {
                     s.resources
                         .entry(name.clone())
                         .or_insert(super::ResourceDef { capacity: super::DEFAULT_CAPACITY });
                 }
-                if let Some(r) = s.queue.iter_mut().find(|r| r.id == queued.id) {
-                    if r.needs != spec.needs {
-                        r.needs = spec.needs.clone();
+                if let Some(r) = s.queue.iter_mut().find(|r| r.id == qid) {
+                    if r.needs != want {
+                        r.needs = want.clone();
                         r.skips = 0;
                     }
                     r.after_ms = spec.after_ms;
@@ -454,16 +634,27 @@ pub(crate) fn queue_at(path: &Path, spec: &LeaseSpec) -> Result<LeaseStatus, Str
                         r.note = spec.note.clone();
                     }
                 }
+                qid
             }
-            None => s.enqueue(new_request(spec, now))?,
-        }
+            None => {
+                let req = new_request(&LeaseSpec { needs: want.clone(), ..spec.clone() }, now);
+                let id = req.id.clone();
+                s.enqueue(req)?;
+                id
+            }
+        };
         s.schedule(&super::holder_alive, now);
+        if let Some(cycle) = super::deadlock::cycle_through(s, &id) {
+            let msg = refuse_deadlock(&backup, session, &want, &cycle);
+            *s = backup;
+            return Err(msg);
+        }
         Ok(status_in(s, session, now))
     })?
 }
 
-/// The session's lease: held, queued (with its place and what it waits on),
-/// or none.
+/// The session's lease: held (with anything it waits for on top), queued
+/// (with its place and what it waits on), or none.
 pub fn status(session: &str) -> Result<LeaseStatus, String> {
     status_at(&state_path()?, session)
 }
@@ -478,33 +669,133 @@ pub(crate) fn status_at(path: &Path, session: &str) -> Result<LeaseStatus, Strin
     })
 }
 
-/// Let go of the session's lease — held or queued. `by` is who asks; anyone
-/// but the owner releases on its behalf (logged as kicked).
-pub fn release(session: &str, by: Option<&str>) -> Result<LeaseRelease, String> {
-    release_at(&state_path()?, session, by)
+/// Let go of the session's leases — held or queued. `only`: just these
+/// resources (units across its pieces; a piece left with nothing goes, one
+/// left with something keeps it); `None`: everything. `by` is who asks;
+/// anyone but the owner releases on its behalf (logged as kicked).
+pub fn release(session: &str, by: Option<&str>, only: Option<&BTreeMap<String, u32>>) -> Result<LeaseRelease, String> {
+    release_at(&state_path()?, session, by, only)
 }
 
-pub(crate) fn release_at(path: &Path, session: &str, by: Option<&str>) -> Result<LeaseRelease, String> {
+pub(crate) fn release_at(
+    path: &Path,
+    session: &str,
+    by: Option<&str>,
+    only: Option<&BTreeMap<String, u32>>,
+) -> Result<LeaseRelease, String> {
     require_session(session)?;
     let found = transact(path, |s| {
         let owner = resolve(s, session);
-        find_lease(s, &owner).map(|(_, r)| (r.id.clone(), owner))
+        let ids: Vec<String> = s
+            .grants
+            .iter()
+            .chain(&s.queue)
+            .filter(|r| r.is_lease() && r.session_id.as_deref() == Some(owner.as_str()))
+            .map(|r| r.id.clone())
+            .collect();
+        (owner, ids)
     })?;
-    let Some((id, owner)) = found else {
-        return Ok(LeaseRelease { lease: None, was_held: false, handed_to: Vec::new() });
-    };
+    let (owner, ids) = found;
+    if ids.is_empty() {
+        return Ok(LeaseRelease::nothing());
+    }
     let by_other = by.is_some_and(|b| !b.is_empty() && b != owner);
-    release_id_at(path, &id, by_other)
+    let now = now_ms();
+    transact_as(path, Cause::LeaseLeft { ids, by_other }, |s| {
+        let pieces: Vec<(bool, ResourceRequest)> = s
+            .grants
+            .iter()
+            .map(|r| (true, r))
+            .chain(s.queue.iter().map(|r| (false, r)))
+            .filter(|(_, r)| r.is_lease() && r.session_id.as_deref() == Some(owner.as_str()))
+            .map(|(g, r)| (g, r.clone()))
+            .collect();
+        let mut left = only.cloned();
+        let mut released = Vec::new();
+        for (was_held, piece) in pieces {
+            let gone: BTreeMap<String, u32> = match left.as_mut() {
+                None => piece.needs.clone(),
+                Some(left) => piece
+                    .needs
+                    .iter()
+                    .filter_map(|(name, &n)| {
+                        let l = left.get_mut(name)?;
+                        let k = (*l).min(n);
+                        *l -= k;
+                        (k > 0).then(|| (name.clone(), k))
+                    })
+                    .collect(),
+            };
+            if gone.is_empty() {
+                continue;
+            }
+            let rest: BTreeMap<String, u32> = piece
+                .needs
+                .iter()
+                .filter_map(|(name, &n)| {
+                    let r = n - gone.get(name).copied().unwrap_or(0);
+                    (r > 0).then(|| (name.clone(), r))
+                })
+                .collect();
+            let whole = rest.is_empty();
+            if whole {
+                s.remove(&piece.id);
+            } else if let Some(r) = s.grants.iter_mut().chain(s.queue.iter_mut()).find(|r| r.id == piece.id) {
+                r.needs = rest;
+                if !was_held {
+                    r.skips = 0;
+                }
+            }
+            released.push(ReleasedPart { id: piece.id, needs: gone, was_held, whole });
+        }
+        let pass = s.schedule(&super::holder_alive, now);
+        let handed_to = s
+            .grants
+            .iter()
+            .filter(|g| pass.granted.contains(&g.id))
+            .cloned()
+            .collect();
+        LeaseRelease {
+            released,
+            kept: s.session_holds(&owner),
+            still_queued: queued_piece(s, &owner).map(|q| q.needs.clone()).unwrap_or_default(),
+            handed_to,
+        }
+    })
 }
 
-/// Release lease `id` (held or queued). `by_other`: on its session's behalf.
+/// Leave the queue: drop the session's queued lease piece, keeping whatever
+/// it holds. Refused when the session holds a lease and waits for nothing.
+pub fn unqueue(session: &str) -> Result<LeaseRelease, String> {
+    unqueue_at(&state_path()?, session)
+}
+
+pub(crate) fn unqueue_at(path: &Path, session: &str) -> Result<LeaseRelease, String> {
+    require_session(session)?;
+    let found = transact(path, |s| {
+        let owner = resolve(s, session);
+        let queued = queued_piece(s, &owner).map(|q| q.id.clone());
+        let held = s.session_leases(&owner).first().map(|g| g.id.clone());
+        (queued, held)
+    })?;
+    match found {
+        (Some(id), _) => release_id_at(path, &id, false),
+        (None, Some(held)) => Err(format!(
+            "{held} is held, not queued, and nothing more is queued — use release"
+        )),
+        (None, None) => Ok(LeaseRelease::nothing()),
+    }
+}
+
+/// Release lease piece `id` (held or queued) whole. `by_other`: on its
+/// session's behalf.
 pub fn release_id(id: &str, by_other: bool) -> Result<LeaseRelease, String> {
     release_id_at(&state_path()?, id, by_other)
 }
 
 pub(crate) fn release_id_at(path: &Path, id: &str, by_other: bool) -> Result<LeaseRelease, String> {
     let now = now_ms();
-    let cause = Cause::LeaseLeft { id: id.to_string(), by_other };
+    let cause = Cause::LeaseLeft { ids: vec![id.to_string()], by_other };
     transact_as(path, cause, |s| {
         let found = s
             .grants
@@ -524,7 +815,13 @@ pub(crate) fn release_id_at(path: &Path, id: &str, by_other: bool) -> Result<Lea
             .filter(|g| pass.granted.contains(&g.id))
             .cloned()
             .collect();
-        Ok(LeaseRelease { lease: Some(lease), was_held, handed_to })
+        let owner = lease.session_id.clone().unwrap_or_default();
+        Ok(LeaseRelease {
+            released: vec![ReleasedPart { id: lease.id, needs: lease.needs, was_held, whole: true }],
+            kept: s.session_holds(&owner),
+            still_queued: queued_piece(s, &owner).map(|q| q.needs.clone()).unwrap_or_default(),
+            handed_to,
+        })
     })?
 }
 
@@ -749,18 +1046,17 @@ mod tests {
         // B queues and waits.
         let q = queue_at(&path, &spec("session-b", &["board"])).unwrap();
         assert!(matches!(q, LeaseStatus::Queued { position: 1, .. }), "{q:?}");
-        // Taking again while holding is a no-op; asking for more is refused.
+        // Taking again while holding is a no-op.
         assert!(take_at(&path, &spec("session-a", &["board"])).unwrap().is_held());
-        assert!(take_at(&path, &spec("session-a", &["board", "phone"])).is_err());
         // A releases: B holds, by an 8-char prefix too.
-        let rel = release_at(&path, "session-a", None).unwrap();
-        assert!(rel.was_held);
+        let rel = release_at(&path, "session-a", None, None).unwrap();
+        assert!(rel.released[0].was_held && rel.released[0].whole);
         assert_eq!(rel.handed_to.len(), 1);
         assert_eq!(rel.handed_to[0].session_id.as_deref(), Some("session-b"));
         assert!(status_at(&path, "session-b").unwrap().is_held());
         assert!(status_at(&path, "session-").unwrap().is_held());
         // Releasing a session with nothing is quiet.
-        assert_eq!(release_at(&path, "session-a", None).unwrap().lease, None);
+        assert!(release_at(&path, "session-a", None, None).unwrap().released.is_empty());
         assert_eq!(
             kinds(&path),
             vec![
@@ -786,8 +1082,8 @@ mod tests {
         // take ignores one's own --after, but the board is busy now.
         let t = take_at(&path, &spec("session-a", &["board"])).unwrap();
         assert!(matches!(t, LeaseStatus::Queued { .. }), "still queued as before: {t:?}");
-        let rel = release_at(&path, "session-a", None).unwrap();
-        assert!(!rel.was_held);
+        let rel = unqueue_at(&path, "session-a").unwrap();
+        assert!(!rel.released[0].was_held);
         assert_eq!(status_at(&path, "session-a").unwrap(), LeaseStatus::None);
         assert_eq!(*kinds(&path).last().unwrap(), ResourceEventKind::Cancelled);
     }
@@ -836,7 +1132,7 @@ mod tests {
     #[test]
     fn kicking_a_lease_releases_it_on_its_behalf() {
         let (_d, path) = scratch();
-        let LeaseStatus::Held { lease } = take_at(&path, &spec("owner-session", &["board"])).unwrap()
+        let LeaseStatus::Held { lease, .. } = take_at(&path, &spec("owner-session", &["board"])).unwrap()
         else {
             panic!()
         };
@@ -845,14 +1141,14 @@ mod tests {
         assert_eq!(snap.holders[0].session_id.as_deref(), Some("next-session"));
         assert!(kinds(&path).contains(&ResourceEventKind::Kicked));
         // Releasing by another session is a kick too.
-        release_at(&path, "next-session", Some("someone-else")).unwrap();
+        release_at(&path, "next-session", Some("someone-else"), None).unwrap();
         assert_eq!(*kinds(&path).last().unwrap(), ResourceEventKind::Kicked);
     }
 
     #[test]
     fn commands_of_a_leasing_session_run_under_the_lease() {
         let (_d, path) = scratch();
-        let LeaseStatus::Held { lease } =
+        let LeaseStatus::Held { lease, .. } =
             take_at(&path, &spec("lease-session", &["board", "phone"])).unwrap()
         else {
             panic!()
@@ -863,6 +1159,169 @@ mod tests {
         assert!(n(&["board", "cargo"], Some("lease-session")).is_err());
         assert_eq!(n(&["board"], Some("other-session")).unwrap(), Nesting::TopLevel);
         assert_eq!(n(&["board"], None).unwrap(), Nesting::TopLevel);
+    }
+
+    fn held_status(st: &LeaseStatus) -> (Vec<String>, BTreeMap<String, u32>, Option<PendingLease>) {
+        let LeaseStatus::Held { leases, needs, pending, .. } = st else { panic!("not held: {st:?}") };
+        (leases.iter().map(|l| l.id.clone()).collect(), needs.clone(), pending.clone())
+    }
+
+    #[test]
+    fn take_while_holding_appends_a_piece() {
+        let (_d, path) = scratch();
+        assert!(take_at(&path, &spec("session-a", &["round"])).unwrap().is_held());
+        let st = take_at(&path, &spec("session-a", &["round", "wave"])).unwrap();
+        let (pieces, held, pending) = held_status(&st);
+        assert_eq!(pieces.len(), 2, "{st:?}");
+        assert_eq!(held, needs(&["round", "wave"]));
+        assert!(pending.is_none());
+        assert!(st.holds(&needs(&["wave"])));
+        assert!(st.describe().starts_with("holding [round, wave] as lease"), "{}", st.describe());
+        // A command of the session may use both pieces at once.
+        let nested = check_nested_at(&path, None, Some("session-a"), &needs(&["round", "wave"])).unwrap();
+        assert_eq!(nested, Nesting::Inherited(pieces[0].clone()));
+        // Asking for more units of a held resource is refused.
+        transact(&path, |s| {
+            s.resources.insert("gpu".into(), super::super::ResourceDef { capacity: 2 });
+        })
+        .unwrap();
+        assert!(take_at(&path, &spec("session-a", &["gpu"])).unwrap().is_held());
+        let err = take_at(&path, &spec("session-a", &["gpu:2"])).unwrap_err();
+        assert!(err.contains("growing a held resource"), "{err}");
+    }
+
+    #[test]
+    fn queue_while_holding_waits_on_top_and_is_granted_later() {
+        let (_d, path) = scratch();
+        take_at(&path, &spec("session-a", &["round"])).unwrap();
+        take_at(&path, &spec("session-c", &["wave"])).unwrap();
+        let st = queue_at(&path, &spec("session-a", &["wave"])).unwrap();
+        let (_, held, pending) = held_status(&st);
+        assert_eq!(held, needs(&["round"]));
+        assert_eq!(pending.unwrap().lease.needs, needs(&["wave"]));
+        assert!(st.waiting() && !st.is_held() && !st.holds(&needs(&["wave"])));
+        assert!(st.describe().contains("on top — waiting on"), "{}", st.describe());
+        release_at(&path, "session-c", None, None).unwrap();
+        let st = status_at(&path, "session-a").unwrap();
+        assert!(st.is_held() && st.holds(&needs(&["round", "wave"])), "{st:?}");
+    }
+
+    #[test]
+    fn releasing_one_resource_hands_it_on_and_keeps_the_rest() {
+        let (_d, path) = scratch();
+        take_at(&path, &spec("session-a", &["round", "wave"])).unwrap();
+        queue_at(&path, &spec("session-b", &["round"])).unwrap();
+        let rel = release_at(&path, "session-a", None, Some(&needs(&["round"]))).unwrap();
+        assert_eq!(rel.released.len(), 1);
+        assert_eq!(rel.released[0].needs, needs(&["round"]));
+        assert!(rel.released[0].was_held && !rel.released[0].whole);
+        assert_eq!(rel.kept, needs(&["wave"]));
+        assert_eq!(rel.handed_to[0].session_id.as_deref(), Some("session-b"));
+        assert!(rel.describe().contains("still holding [wave]"), "{}", rel.describe());
+        let a = status_at(&path, "session-a").unwrap();
+        assert!(a.holds(&needs(&["wave"])) && !a.holds(&needs(&["round"])), "{a:?}");
+        assert!(status_at(&path, "session-b").unwrap().is_held());
+        // History: the piece shrank (released round, kept wave), then B got it.
+        let h = history::read_history_at(&path, &HistoryQuery::default()).events;
+        assert_eq!(h[0].kind, ResourceEventKind::Granted);
+        assert_eq!(h[1].kind, ResourceEventKind::Released);
+        assert_eq!(h[1].needs, needs(&["round"]));
+        assert_eq!(h[1].kept, needs(&["wave"]));
+        assert!(history::render_history(&history::ResourceHistory { events: vec![h[1].clone()], has_more: false })
+            .contains("kept [wave]"));
+        // Releasing what the session does not hold is quiet.
+        assert!(release_at(&path, "session-a", None, Some(&needs(&["round"]))).unwrap().released.is_empty());
+        // Releasing the rest drops the piece.
+        let rel = release_at(&path, "session-a", None, Some(&needs(&["wave"]))).unwrap();
+        assert!(rel.released[0].whole && rel.kept.is_empty());
+        assert_eq!(status_at(&path, "session-a").unwrap(), LeaseStatus::None);
+    }
+
+    #[test]
+    fn partial_release_spans_pieces() {
+        let (_d, path) = scratch();
+        take_at(&path, &spec("session-a", &["round"])).unwrap();
+        take_at(&path, &spec("session-a", &["wave", "phone"])).unwrap();
+        let rel = release_at(&path, "session-a", None, Some(&needs(&["round", "phone"]))).unwrap();
+        assert_eq!(rel.released.len(), 2);
+        assert!(rel.released[0].whole, "the round piece goes whole");
+        assert!(!rel.released[1].whole, "the other keeps wave");
+        assert_eq!(rel.kept, needs(&["wave"]));
+    }
+
+    #[test]
+    fn crossed_waits_while_holding_are_refused() {
+        let (_d, path) = scratch();
+        take_at(&path, &spec("session-a", &["round"])).unwrap();
+        take_at(&path, &spec("session-b", &["wave"])).unwrap();
+        // A waits for wave while holding round: fine on its own.
+        assert!(queue_at(&path, &spec("session-a", &["wave"])).unwrap().waiting());
+        let before = std::fs::read(&path).unwrap();
+        // B waiting for round while holding wave closes the cycle.
+        let err = queue_at(&path, &spec("session-b", &["round"])).unwrap_err();
+        assert!(err.contains("would deadlock"), "{err}");
+        assert!(err.contains("waits for round held by lease"), "{err}");
+        assert_eq!(std::fs::read(&path).unwrap(), before, "nothing changed");
+        // take never waits: round is held, so it is only busy.
+        assert!(matches!(take_at(&path, &spec("session-b", &["round"])).unwrap(), LeaseStatus::Busy { .. }));
+        // Nor may B's commands wait for round.
+        let job = super::super::AcquireSpec {
+            id: "jb".into(),
+            kind: RequestKind::Job,
+            needs: needs(&["round"]),
+            priority: Priority::Normal,
+            max_wait: Some(Duration::from_millis(1)),
+            command: "flash".into(),
+            workspace: None,
+            session_id: Some("session-b".into()),
+        };
+        let err = super::super::acquire_at(&path, job, Holder::current(), Duration::from_millis(1), |_| true)
+            .unwrap_err();
+        let super::super::AcquireError::Rejected(msg) = err else { panic!("{err:?}") };
+        assert!(msg.contains("would deadlock"), "{msg}");
+        assert!(!kinds(&path).contains(&ResourceEventKind::Aborted), "refused, never queued");
+        // Once A lets go of round, B may queue for it.
+        unqueue_at(&path, "session-a").unwrap();
+        assert!(queue_at(&path, &spec("session-b", &["round"])).unwrap().waiting());
+    }
+
+    #[test]
+    fn a_lease_whose_session_waits_never_fills_a_gap() {
+        // `phone` is reserved by c, waiting for the busy board with skips to
+        // spare. A lease of a session that waits for nothing else may pass c;
+        // one whose session also waits (a's job for desk) may not.
+        let build = |also_waits: bool| {
+            let mut s = State::default();
+            s.enqueue(job("h", &["board"])).unwrap();
+            s.enqueue(job("d", &["desk"])).unwrap();
+            s.schedule(&alive, 1);
+            s.enqueue(lease_req("lc", "c", &["board", "phone"])).unwrap();
+            if also_waits {
+                let mut ja = job("ja", &["desk"]);
+                ja.session_id = Some("a".into());
+                s.enqueue(ja).unwrap();
+            }
+            s.enqueue(lease_req("la", "a", &["phone"])).unwrap();
+            s.schedule(&alive, 1);
+            s
+        };
+        assert!(granted(&build(false)).contains(&"la"));
+        let s = build(true);
+        assert!(!granted(&s).contains(&"la"));
+        let snap = s.snapshot(1);
+        let la = snap.queue.iter().find(|q| q.request.id == "la").unwrap();
+        assert_eq!(la.wait_on[0].reason, WaitReason::Reserved);
+        assert_eq!(la.wait_on[0].by, vec!["lc".to_string()]);
+    }
+
+    #[test]
+    fn ls_marks_a_queued_piece_of_a_holding_session() {
+        let (_d, path) = scratch();
+        take_at(&path, &spec("session-a", &["round"])).unwrap();
+        take_at(&path, &spec("session-c", &["wave"])).unwrap();
+        queue_at(&path, &spec("session-a", &["wave"])).unwrap();
+        let text = super::super::render_snapshot(&super::super::snapshot_at(&path).unwrap());
+        assert!(text.contains("· holds [round]"), "{text}");
     }
 
     #[test]

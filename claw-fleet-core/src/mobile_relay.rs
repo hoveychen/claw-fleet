@@ -5624,7 +5624,7 @@ mod tests {
                 workspace: None,
             };
             let held = lease::take(&spec("sess-a")).unwrap();
-            let lease::LeaseStatus::Held { lease: a } = held else { panic!("{held:?}") };
+            let lease::LeaseStatus::Held { lease: a, .. } = held else { panic!("{held:?}") };
             let queued = lease::queue(&spec("sess-b")).unwrap();
             assert!(matches!(queued, lease::LeaseStatus::Queued { .. }), "{queued:?}");
 

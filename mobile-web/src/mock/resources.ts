@@ -226,6 +226,15 @@ function seedHistory(): ResourceEvent[] {
     ev(kind, handed, tsMs, { pid: undefined, sessionId: from, ...extra });
   out.push(leaseEv("enqueued", handed.enqueuedMs), leaseEv("granted", handed.enqueuedMs, { waitedMs: 0 }));
   out.push(leaseEv("transferred", handed.enqueuedMs + 9 * MIN, { sessionId: to, fromSessionId: from }));
+  // Part of it let go first (`release --need`): the board is kept.
+  out.push(
+    leaseEv("released", handed.enqueuedMs + 12 * MIN, {
+      sessionId: to,
+      heldMs: 12 * MIN,
+      needs: { "pixel-phone": 1 },
+      kept: { "esp32-board": 1 },
+    }),
+  );
   out.push(leaseEv("released", handed.enqueuedMs + 16 * MIN, { sessionId: to, heldMs: 16 * MIN }));
   const lapsed = req("l-6a02", { "esp32-board": 1 }, "", "/Users/boss/workspace/esp-os", 44 * MIN, {
     ...LEASE,

@@ -1173,6 +1173,8 @@ const DICT: Record<string, string> = {
   低优先级: "Low priority",
   "占 {0} 份": "{0} units",
   "还要 {0}": "Also needs {0}",
+  "已持有 {0}": "already holds {0}",
+  "仍持有 {0}": "still holds {0}",
   "等 {0}，被 {1} 占用": "Waiting on {0}, held by {1}",
   "{0} 已留给排在前面的 {1}": "{0} is reserved for {1}, ahead in the queue",
   "（隐身任务，命令不显示）": "(incognito task, command hidden)",

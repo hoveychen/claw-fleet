@@ -455,6 +455,14 @@ function ResourceCard({
                         {t("resources.skips", "已被插空 {{n}} 次", { n: r.skips })}
                       </span>
                     )}
+                    {sessionHolds(r, byId) && (
+                      <span
+                        className={styles.tag}
+                        title={t("resources.lease_holds_hint", "这个会话已经持有这些资源，这条是在它之上追加的排队")}
+                      >
+                        {t("resources.lease_holds", "已持有 {{needs}}", { needs: sessionHolds(r, byId) })}
+                      </span>
+                    )}
                     <NeedChips r={r} except={res.name} />
                   </div>
                   {q.waitOn.filter((w) => w.reason !== "after").map((w) => (
@@ -532,6 +540,20 @@ function RequestLine({ r, onOpenSession }: { r: ResourceRequest; onOpenSession: 
       )}
     </div>
   );
+}
+
+/** What the session behind a queued lease piece already holds (its other,
+ *  granted lease pieces): the piece waits for more on top of that. */
+export function sessionHolds(r: ResourceRequest, byId: Map<string, ResourceRequest>): string {
+  if (r.kind !== "lease" || !r.sessionId) return "";
+  const held: Record<string, number> = {};
+  for (const h of byId.values()) {
+    if (h.kind !== "lease" || h.grantedMs == null || h.sessionId !== r.sessionId || h.id === r.id) continue;
+    for (const [n, u] of Object.entries(h.needs)) held[n] = (held[n] ?? 0) + (u ?? 0);
+  }
+  return Object.entries(held)
+    .map(([n, u]) => (u === 1 ? n : `${n}:${u}`))
+    .join(", ");
 }
 
 /** The other resources a request needs besides this card's: a multi-resource

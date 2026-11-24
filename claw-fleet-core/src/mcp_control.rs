@@ -267,12 +267,12 @@ fn job_tool_def() -> Value {
 fn resource_tool_def() -> Value {
     json!({
         "name": "fleet__resource",
-        "description": "Session LEASES on machine-global resources: hold something exclusive (a dev board, a phone, a test device) across many commands and turns, until you release it — not just for one command. For ONE command use fleet__job's `need` instead; it releases when the command exits. A lease belongs to this session: it moves to your successor on a handoff, and is released automatically about 2 minutes after the session has ended (no process, watch, card or handoff left); someone can also release it on your behalf. Actions: take (grant now or refuse — nothing is queued), queue (wait in line, optionally not before `after`; granted at once if free — then register `fleet__watch` with until `fleet resource mine --session <your id>`, which exits 0 once it is yours), release (let go, or leave the queue; the next in line gets it at once), unqueue (leave the queue), mine (held / queued / none), ls (the whole table). Declare ALL resources in one take/queue: a session holds at most one lease, and asking for more while holding some is refused (release, then take everything at once). Commands you run for resources your lease holds (fleet__job need, `fleet resource run`) run under the lease without queueing.",
+        "description": "Session LEASES on machine-global resources: hold something exclusive (a dev board, a phone, a test device) across many commands and turns, until you release it — not just for one command. For ONE command use fleet__job's `need` instead; it releases when the command exits. A lease belongs to this session: it moves to your successor on a handoff, and is released automatically about 2 minutes after the session has ended (no process, watch, card or handoff left); someone can also release it on your behalf. Actions: take (grant now or refuse — nothing is queued), queue (wait in line, optionally not before `after`; granted at once if free — then register `fleet__watch` with until `fleet resource mine --session <your id>`, which exits 0 once it is yours), release (let go of everything, or with `need` only those resources and keep the rest; the next in line gets them at once), unqueue (leave the queue, keeping what you hold), mine (held / queued / none), ls (the whole table). While holding some you may take or queue for more — what you hold is kept and the rest is added; a wait that could deadlock with another session (each holding what the other waits for) is refused, so then release first and queue for everything at once. Commands you run for resources your lease holds (fleet__job need, `fleet resource run`) run under the lease without queueing.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {"type": "string", "enum": ["take", "queue", "release", "unqueue", "mine", "ls"]},
-                "need": {"type": "array", "items": {"type": "string"}, "description": "Resources (take/queue), each `name` or `name:units` — e.g. [\"esp-board\"]. Same names as fleet__job's need; `fleet resource ls` shows the existing ones."},
+                "need": {"type": "array", "items": {"type": "string"}, "description": "Resources (take/queue; release: only these), each `name` or `name:units` — e.g. [\"esp-board\"]. Same names as fleet__job's need; `fleet resource ls` shows the existing ones."},
                 "note": {"type": "string", "description": "What you hold it for, shown to everyone (take/queue), e.g. \"flashing firmware for the e2e run\"."},
                 "after": {"type": "string", "description": "queue only: not granted before this — `30m`, `8h`, `21:00`, `11-24 09:00` or `2026-11-24 09:00` (local). Until then it holds nobody up."},
                 "priority": {"type": "string", "enum": ["high", "normal", "low"], "description": "Queue priority (take/queue); default normal."},
@@ -854,7 +854,7 @@ fn handle_resource(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String
             let sp = spec(after)?;
             let st = lease::queue(&sp)?;
             let mut out = st.describe();
-            if !st.is_held() {
+            if st.waiting() {
                 out.push_str(&format!(
                     "\nWait for it with fleet__watch: until `fleet resource mine --session {}`                      (exits 0 once the lease is yours).",
                     sp.session_id
@@ -862,32 +862,13 @@ fn handle_resource(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String
             }
             Ok(out)
         }
-        "release" | "unqueue" => {
+        "release" => {
             let who = target()?;
-            if action == "unqueue" {
-                if let lease::LeaseStatus::Held { lease } = lease::status(&who)? {
-                    return Err(format!("{} is held, not queued — use action=release", lease.id));
-                }
-            }
-            let rel = lease::release(&who, me)?;
-            Ok(match rel.lease {
-                None => "ok: no lease held or queued — nothing to do.".to_string(),
-                Some(l) => {
-                    let what = if rel.was_held { "released" } else { "left the queue" };
-                    let next: Vec<&str> = rel.handed_to.iter().map(|r| r.id.as_str()).collect();
-                    if next.is_empty() {
-                        format!("ok: {} [{}] {what}.", l.id, rq::format_needs(&l.needs))
-                    } else {
-                        format!(
-                            "ok: {} [{}] {what}; now granted: {}.",
-                            l.id,
-                            rq::format_needs(&l.needs),
-                            next.join(", ")
-                        )
-                    }
-                }
-            })
+            let only = rq::parse_needs(&need_list(args)?)?;
+            let only = (!only.is_empty()).then_some(only);
+            Ok(lease::release(&who, me, only.as_ref())?.describe())
         }
+        "unqueue" => Ok(lease::unqueue(&target()?)?.describe()),
         "mine" => Ok(lease::status(&target()?)?.describe()),
         other => Err(format!("unknown resource action: {other}")),
     }

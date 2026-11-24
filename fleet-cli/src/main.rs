@@ -1128,6 +1128,8 @@ pub(crate) enum ResourceCommands {
     /// Take a session lease now: hold these resources across commands and
     /// turns until `release` (or until the session ends). Exits 2 without
     /// queueing when they are not available — use `queue` to wait in line.
+    /// A session already holding some keeps them and adds the rest; a wait
+    /// that could deadlock with other sessions is refused (exit 1).
     Take {
         #[arg(long = "need", value_name = "NAME[:UNITS]", required = true)]
         need: Vec<String>,
@@ -1145,7 +1147,8 @@ pub(crate) enum ResourceCommands {
     /// Queue for a session lease (granted at once if nothing stands in the
     /// way). Poll `fleet resource mine` — e.g. from `fleet watch create
     /// --until` — to learn when it is yours. Queueing again updates the
-    /// request and keeps its place.
+    /// request and keeps its place. A session already holding some keeps them
+    /// and queues for the rest, unless that could deadlock (refused, exit 1).
     Queue {
         #[arg(long = "need", value_name = "NAME[:UNITS]", required = true)]
         need: Vec<String>,
@@ -1163,18 +1166,23 @@ pub(crate) enum ResourceCommands {
         json: bool,
     },
     /// Release the session's lease (or leave the queue if it only waits);
-    /// the next in line gets the resources at once. With `--session` of
-    /// another session, release on its behalf.
+    /// the next in line gets the resources at once. With `--need`, release
+    /// only those and keep the rest. With `--session` of another session,
+    /// release on its behalf.
     Release {
+        /// Release only these (repeatable); default: everything.
+        #[arg(long = "need", value_name = "NAME[:UNITS]")]
+        need: Vec<String>,
         #[arg(long)]
         session: Option<String>,
     },
-    /// Leave the queue without having held anything.
+    /// Leave the queue, keeping whatever the session holds.
     Unqueue {
         #[arg(long)]
         session: Option<String>,
     },
-    /// The session's lease. Exit 0 = held, 1 = queued, 2 = neither — so
+    /// The session's lease. Exit 0 = held (and waiting for nothing more),
+    /// 1 = queued (for a first lease or for more on top), 2 = neither — so
     /// `fleet watch create --until 'fleet resource mine --session <id>'`
     /// wakes the session once it holds.
     Mine {
