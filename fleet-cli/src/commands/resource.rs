@@ -46,29 +46,6 @@ fn print_status(st: &lease::LeaseStatus, json: bool) {
     }
 }
 
-fn print_release(rel: &lease::LeaseRelease) {
-    match &rel.lease {
-        None => println!("ok: this session holds no lease and is not queued — nothing to do."),
-        Some(l) => {
-            let what = if rel.was_held { "released" } else { "left the queue" };
-            print!("ok: {} [{}] {what}", l.id, rq::format_needs(&l.needs));
-            if rel.handed_to.is_empty() {
-                println!(".");
-            } else {
-                let to: Vec<String> = rel
-                    .handed_to
-                    .iter()
-                    .map(|r| match (&r.session_id, r.is_lease()) {
-                        (Some(s), true) => format!("{} (session {})", r.id, &s[..s.len().min(8)]),
-                        _ => r.id.clone(),
-                    })
-                    .collect();
-                println!("; now granted: {}.", to.join(", "));
-            }
-        }
-    }
-}
-
 fn fail(e: impl std::fmt::Display) -> ! {
     eprintln!("Error: {e}");
     std::process::exit(1);
@@ -166,7 +143,7 @@ pub(crate) fn cmd_resource(action: ResourceCommands) {
             let spec = lease_spec(need, note, priority, session, None);
             let st = lease::take(&spec).unwrap_or_else(|e| fail(e));
             print_status(&st, json);
-            std::process::exit(if st.is_held() { 0 } else { 2 });
+            std::process::exit(if st.holds(&spec.needs) { 0 } else { 2 });
         }
         ResourceCommands::Queue { need, after, note, priority, session, json } => {
             let after_ms = after.map(|a| {
@@ -175,7 +152,7 @@ pub(crate) fn cmd_resource(action: ResourceCommands) {
             let spec = lease_spec(need, note, priority, session, after_ms);
             let st = lease::queue(&spec).unwrap_or_else(|e| fail(e));
             print_status(&st, json);
-            if !json && !st.is_held() {
+            if !json && st.waiting() {
                 println!(
                     "wait for it with: fleet watch create --until 'fleet resource mine --session {}' \\\n    --note 'waiting for lease [{}]'",
                     spec.session_id,
@@ -183,34 +160,28 @@ pub(crate) fn cmd_resource(action: ResourceCommands) {
                 );
             }
         }
-        ResourceCommands::Release { session } => {
+        ResourceCommands::Release { need, session } => {
             let me = resolve_session_id(None);
             let target = session.or_else(|| me.clone()).unwrap_or_else(|| fail(NO_SESSION));
-            let rel = lease::release(&target, me.as_deref()).unwrap_or_else(|e| fail(e));
-            print_release(&rel);
+            let only = rq::parse_needs(&need).unwrap_or_else(|e| fail(e));
+            let only = (!only.is_empty()).then_some(only);
+            let rel = lease::release(&target, me.as_deref(), only.as_ref()).unwrap_or_else(|e| fail(e));
+            println!("{}", rel.describe());
         }
         ResourceCommands::Unqueue { session } => {
             let target = session.or_else(|| resolve_session_id(None)).unwrap_or_else(|| fail(NO_SESSION));
-            match lease::status(&target).unwrap_or_else(|e| fail(e)) {
-                lease::LeaseStatus::Held { lease } => fail(format!(
-                    "{} is held, not queued — use `fleet resource release`",
-                    lease.id
-                )),
-                lease::LeaseStatus::Queued { .. } => {
-                    let rel = lease::release(&target, Some(&target)).unwrap_or_else(|e| fail(e));
-                    print_release(&rel);
-                }
-                _ => println!("ok: not queued — nothing to do."),
-            }
+            println!("{}", lease::unqueue(&target).unwrap_or_else(|e| fail(e)).describe());
         }
         ResourceCommands::Mine { session, json } => {
             let target = session.or_else(|| resolve_session_id(None)).unwrap_or_else(|| fail(NO_SESSION));
             let st = lease::status(&target).unwrap_or_else(|e| fail(e));
             print_status(&st, json);
-            std::process::exit(match st {
-                lease::LeaseStatus::Held { .. } => 0,
-                lease::LeaseStatus::Queued { .. } => 1,
-                _ => 2,
+            std::process::exit(if st.is_held() {
+                0
+            } else if st.waiting() {
+                1
+            } else {
+                2
             });
         }
         ResourceCommands::Rm { name } => {
