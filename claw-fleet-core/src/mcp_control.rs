@@ -854,7 +854,7 @@ fn handle_resource(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String
             let sp = spec(after)?;
             let st = lease::queue(&sp)?;
             let mut out = st.describe();
-            if !st.is_held() {
+            if st.waiting() {
                 out.push_str(&format!(
                     "\nWait for it with fleet__watch: until `fleet resource mine --session {}`                      (exits 0 once the lease is yours).",
                     sp.session_id
@@ -862,32 +862,13 @@ fn handle_resource(args: &Value, sid: Option<&str>, cwd: &Path) -> Result<String
             }
             Ok(out)
         }
-        "release" | "unqueue" => {
+        "release" => {
             let who = target()?;
-            if action == "unqueue" {
-                if let lease::LeaseStatus::Held { lease } = lease::status(&who)? {
-                    return Err(format!("{} is held, not queued — use action=release", lease.id));
-                }
-            }
-            let rel = lease::release(&who, me)?;
-            Ok(match rel.lease {
-                None => "ok: no lease held or queued — nothing to do.".to_string(),
-                Some(l) => {
-                    let what = if rel.was_held { "released" } else { "left the queue" };
-                    let next: Vec<&str> = rel.handed_to.iter().map(|r| r.id.as_str()).collect();
-                    if next.is_empty() {
-                        format!("ok: {} [{}] {what}.", l.id, rq::format_needs(&l.needs))
-                    } else {
-                        format!(
-                            "ok: {} [{}] {what}; now granted: {}.",
-                            l.id,
-                            rq::format_needs(&l.needs),
-                            next.join(", ")
-                        )
-                    }
-                }
-            })
+            let only = rq::parse_needs(&need_list(args)?)?;
+            let only = (!only.is_empty()).then_some(only);
+            Ok(lease::release(&who, me, only.as_ref())?.describe())
         }
+        "unqueue" => Ok(lease::unqueue(&target()?)?.describe()),
         "mine" => Ok(lease::status(&target()?)?.describe()),
         other => Err(format!("unknown resource action: {other}")),
     }

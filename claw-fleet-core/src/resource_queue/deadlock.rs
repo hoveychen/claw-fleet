@@ -67,7 +67,7 @@ fn edges(state: &State) -> Vec<Vec<(usize, Why)>> {
         a.session_id.is_some() && a.session_id == b.session_id
     };
     let mut out: Vec<Vec<(usize, Why)>> = vec![Vec::new(); all.len()];
-    let mut push = |from: usize, to: usize, why: Why, out: &mut Vec<Vec<(usize, Why)>>| {
+    let push = |from: usize, to: usize, why: Why, out: &mut Vec<Vec<(usize, Why)>>| {
         if from != to && !out[from].iter().any(|(t, _)| *t == to) {
             out[from].push((to, why));
         }

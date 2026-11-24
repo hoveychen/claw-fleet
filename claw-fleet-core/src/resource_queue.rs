@@ -1179,8 +1179,18 @@ fn move_request_at(path: &Path, id: &str, target: &MoveTarget) -> Result<Resourc
     let now = now_ms();
     transact(path, |s| {
         s.schedule(&holder_alive, now);
+        let backup = s.clone();
         s.move_request(id, target)?;
         s.schedule(&holder_alive, now);
+        if s.queue.iter().any(|q| q.id == id) {
+            if let Some(cycle) = deadlock::cycle_through(s, id) {
+                *s = backup;
+                return Err(format!(
+                    "refused: moving {id} there would deadlock — {}",
+                    deadlock::explain(&cycle)
+                ));
+            }
+        }
         Ok(s.snapshot(now))
     })?
 }
@@ -1449,6 +1459,18 @@ pub fn render_snapshot(snap: &ResourceSnapshot) -> String {
             if let Some(note) = &r.note {
                 s.push_str(&format!("  {}", short(note)));
             }
+            // A queued piece of a session that holds others: it waits on top.
+            if r.granted_ms.is_none() {
+                let mut held: BTreeMap<String, u32> = BTreeMap::new();
+                for h in snap.holders.iter().filter(|h| h.is_lease() && h.session_id == r.session_id) {
+                    for (name, &n) in &h.needs {
+                        *held.entry(name.clone()).or_insert(0) += n;
+                    }
+                }
+                if !held.is_empty() {
+                    s.push_str(&format!(" · holds [{}]", format_needs(&held)));
+                }
+            }
             return s;
         }
         let what = if r.command.is_empty() { "(private)".to_string() } else { short(&r.command) };
@@ -1681,7 +1703,24 @@ fn acquire_at(
     let now = now_ms();
     transact(path, |s| {
         s.schedule(&holder_alive, now);
-        s.enqueue(request)
+        let backup = s.clone();
+        s.enqueue(request)?;
+        s.schedule(&holder_alive, now);
+        // Waiting is only refused when it could close a cycle — through the
+        // leases of this command's session ([`deadlock`]). Refused in the same
+        // transaction it was queued in, so the history never sees it.
+        if s.queue.iter().any(|q| q.id == id) {
+            if let Some(cycle) = deadlock::cycle_through(s, &id) {
+                *s = backup;
+                return Err(format!(
+                    "resource request refused: waiting here would deadlock — {}. Release what \
+                     this session's lease holds of it first (fleet resource release --need …), \
+                     or run this command when the other side is done.",
+                    deadlock::explain(&cycle)
+                ));
+            }
+        }
+        Ok(())
     })
     .and_then(|r| r)
     .map_err(AcquireError::Rejected)?;
