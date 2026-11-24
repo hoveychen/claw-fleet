@@ -10,8 +10,11 @@
 //! * **a dead holder** — a holder is a `(pid, process start time)` pair, and
 //!   every scheduling pass first drops holders and waiters whose process is
 //!   gone;
-//! * **hold-and-wait** — nothing ever waits while holding a subset, and a
-//!   command running under a grant may not ask for more (see [`check_nested`]);
+//! * **hold-and-wait** — a command never waits while holding a subset, and a
+//!   command running under a grant may not ask for more (see [`check_nested`]).
+//!   A session lease may wait for more while it holds some (an append), and
+//!   its session's commands may queue: any such wait that could close a cycle
+//!   is refused when it is made ([`deadlock`]);
 //! * **stale word of mouth** — the table in `~/.fleet/resources/state.json` is
 //!   the only source of truth, and anyone can read who holds and who waits.
 //!
@@ -45,6 +48,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+mod deadlock;
 pub mod history;
 pub mod lease;
 use history::Cause;
@@ -510,12 +514,24 @@ impl State {
     /// further ahead may still go to a later request when every one of those
     /// reservers has skips to spare ([`ResourceRequest::max_skips`]); each of
     /// them is then charged one skip.
+    ///
+    /// A lease whose session has anything else in the queue is never granted
+    /// past anyone — not past a reserver with skips to spare, nor past a
+    /// request ahead that is not due yet. Once granted, such a lease is kept
+    /// while its session waits, so a request it passed would start waiting on
+    /// it without having done so before: the one way a grant could close a
+    /// cycle that [`deadlock`] did not see coming.
     fn plan(&self, now_ms: u64) -> Plan {
         let mut used = self.in_use();
         // Resource → queue indexes of the requests that reserved it.
         let mut reserved: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
         let mut out = Plan::default();
         for (i, req) in self.queue.iter().enumerate() {
+            let strict = req.is_lease()
+                && req.session_id.is_some()
+                && self.queue.iter().enumerate().any(|(j, r)| {
+                    j != i && r.session_id == req.session_id && !out.grant.contains(&j)
+                });
             if req.not_yet(now_ms) {
                 let blockers = req
                     .needs
@@ -541,11 +557,28 @@ impl State {
                     held_back.push((name.as_str(), ahead));
                 }
             }
+            // Requests ahead that are not due yet: passed by anyone but a
+            // strict lease, which waits behind them (see above).
+            let mut early: Vec<(&str, Vec<usize>)> = Vec::new();
+            if strict {
+                for name in req.needs.keys() {
+                    let ahead: Vec<usize> = (0..i)
+                        .filter(|&j| self.queue[j].not_yet(now_ms) && self.queue[j].needs.contains_key(name))
+                        .collect();
+                    if !ahead.is_empty() {
+                        early.push((name.as_str(), ahead));
+                    }
+                }
+            }
             let spare = |j: usize| {
                 let r = &self.queue[j];
                 r.skips + out.passed.get(&j).copied().unwrap_or(0) < r.max_skips()
             };
-            let passable = held_back.iter().all(|(_, ahead)| ahead.iter().all(|&j| spare(j)));
+            let passable = if strict {
+                held_back.is_empty() && early.is_empty()
+            } else {
+                held_back.iter().all(|(_, ahead)| ahead.iter().all(|&j| spare(j)))
+            };
             if busy.is_empty() && passable {
                 for (name, &n) in &req.needs {
                     *used.entry(name.clone()).or_insert(0) += n;
@@ -565,11 +598,21 @@ impl State {
                         by: Vec::new(),
                     })
                     .collect();
-                blockers.extend(held_back.iter().map(|(name, ahead)| WaitOn {
-                    resource: name.to_string(),
-                    reason: WaitReason::Reserved,
-                    by: ahead.iter().map(|&j| self.queue[j].id.clone()).collect(),
-                }));
+                let ahead_of = held_back
+                    .iter()
+                    .map(|(name, ahead)| (*name, ahead.as_slice()))
+                    .chain(early.iter().map(|(name, ahead)| (*name, ahead.as_slice())));
+                for (name, ahead) in ahead_of {
+                    let ids = ahead.iter().map(|&j| self.queue[j].id.clone());
+                    match blockers.iter_mut().find(|b| b.resource == *name) {
+                        Some(b) => b.by.extend(ids),
+                        None => blockers.push(WaitOn {
+                            resource: name.to_string(),
+                            reason: WaitReason::Reserved,
+                            by: ids.collect(),
+                        }),
+                    }
+                }
                 blockers.sort_by(|a, b| a.resource.cmp(&b.resource));
                 for name in req.needs.keys() {
                     reserved.entry(name.as_str()).or_default().push(i);
@@ -860,9 +903,15 @@ impl State {
         let Some(held) = self.grants.iter().find(|g| g.id == outer) else {
             return Ok(Nesting::TopLevel);
         };
+        // A lease's session may hold several pieces; a command under one of
+        // them may use them all.
+        let held_needs = match (held.is_lease(), held.session_id.as_deref()) {
+            (true, Some(sid)) => self.session_holds(sid),
+            _ => held.needs.clone(),
+        };
         let missing: BTreeMap<String, u32> = needs
             .iter()
-            .filter(|(name, &n)| held.needs.get(*name).copied().unwrap_or(0) < n)
+            .filter(|(name, &n)| held_needs.get(*name).copied().unwrap_or(0) < n)
             .map(|(name, &n)| (name.clone(), n))
             .collect();
         if missing.is_empty() {
@@ -873,7 +922,7 @@ impl State {
              which holds [{}], and asked for [{}] on top. Waiting for more while holding some is \
              how deadlocks start — declare every resource on the outermost command instead \
              (add --need for [{}] there).",
-            format_needs(&held.needs),
+            format_needs(&held_needs),
             format_needs(&missing),
             format_needs(&missing),
         ))
@@ -881,33 +930,55 @@ impl State {
 }
 
 impl State {
-    /// [`State::nesting`] for the lease `session` holds, if any.
+    /// The session's granted lease pieces, oldest grant first.
+    fn session_leases(&self, session: &str) -> Vec<&ResourceRequest> {
+        self.grants
+            .iter()
+            .filter(|g| g.is_lease() && g.session_id.as_deref() == Some(session))
+            .collect()
+    }
+
+    /// Everything the session's leases hold together.
+    fn session_holds(&self, session: &str) -> BTreeMap<String, u32> {
+        let mut held = BTreeMap::new();
+        for g in self.session_leases(session) {
+            for (name, &n) in &g.needs {
+                *held.entry(name.clone()).or_insert(0) += n;
+            }
+        }
+        held
+    }
+
+    /// [`State::nesting`] for the leases `session` holds, if any.
     fn lease_nesting(&self, session: Option<&str>, needs: &BTreeMap<String, u32>) -> Result<Nesting, String> {
         let Some(session) = session else { return Ok(Nesting::TopLevel) };
-        let Some(held) = self
-            .grants
-            .iter()
-            .find(|g| g.is_lease() && g.session_id.as_deref() == Some(session))
-        else {
-            return Ok(Nesting::TopLevel);
-        };
-        if !needs.keys().any(|n| held.needs.contains_key(n)) {
+        let pieces = self.session_leases(session);
+        let held = self.session_holds(session);
+        if !needs.keys().any(|n| held.contains_key(n)) {
             return Ok(Nesting::TopLevel);
         }
         let missing: BTreeMap<String, u32> = needs
             .iter()
-            .filter(|(name, &n)| held.needs.get(*name).copied().unwrap_or(0) < n)
+            .filter(|(name, &n)| held.get(*name).copied().unwrap_or(0) < n)
             .map(|(name, &n)| (name.clone(), n))
             .collect();
         if missing.is_empty() {
-            return Ok(Nesting::Inherited(held.id.clone()));
+            // Named after the oldest piece it uses.
+            let under = pieces
+                .iter()
+                .find(|g| needs.keys().any(|n| g.needs.contains_key(n)))
+                .map(|g| g.id.clone())
+                .unwrap_or_default();
+            return Ok(Nesting::Inherited(under));
         }
+        let ids: Vec<&str> = pieces.iter().map(|g| g.id.as_str()).collect();
         Err(format!(
-            "resource request refused: this session holds lease {} for [{}] and the command \
-             asked for [{}] on top. Commands may use what the lease holds without queueing; \
-             ask only for [{}] here, or release the lease and take everything at once.",
-            held.id,
-            format_needs(&held.needs),
+            "resource request refused: this session's leases ({}) hold [{}] and the command \
+             asked for [{}] on top. Commands may use what the session holds without queueing; \
+             add [{}] to the session's lease first (`fleet resource take --need …` or `queue`), \
+             or ask only for what it holds here.",
+            ids.join(", "),
+            format_needs(&held),
             format_needs(&missing),
             format_needs(&missing),
         ))
