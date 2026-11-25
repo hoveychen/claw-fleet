@@ -928,6 +928,15 @@ pub fn compose_successor_prompt(p: &PendingHandoff, prior: Option<&HandoffChain>
         v = p.hop,
         next = p.hop + 1
     ));
+    // This prompt is where a successor picks up "棒" and the predecessor's
+    // session id, and it then repeated both to the user verbatim ("上一棒
+    // （cc38bdf4）"). The words stay here — parsers key on the lines above —
+    // so the prompt says outright that they are not for the user.
+    out.push_str(
+        "「棒」「接力」和上面的 session id 是 Fleet 内部的说法，老板没见过定义。\
+         跟老板提到之前的工作时说「之前那次调研」「前面已经做完的部分」，不说「上一棒」「第 3 棒」，也不报 session id；\
+         交接文档里前任自己起的代号（方案 A/B、T0/Tc 这类）同样先换成它指的内容再说。\n\n",
+    );
     if let Some(chain) = prior.filter(|c| !c.links.is_empty()) {
         let ran = chain.session_ids().len();
         out.push_str(&format!(
@@ -2623,6 +2632,8 @@ mod tests {
         // contains the term "handoff chain" in an unrelated sentence.)
         let first = compose_successor_prompt(&taken, chain_containing_in(&cdir, "s1").as_ref());
         assert!(!first.contains("第 1 棒  "), "{first}");
+        // The relay vocabulary and the session id are flagged as internal.
+        assert!(first.contains("不说「上一棒」「第 3 棒」，也不报 session id"), "{first}");
         record_link_in(&cdir, &taken, "s2", 1002).unwrap();
 
         register_simple(&pdir, &cdir, "s2", "维度改 1024", 2000).unwrap();
