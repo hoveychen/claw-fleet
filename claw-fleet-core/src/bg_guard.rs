@@ -308,13 +308,25 @@ pub fn parse_user_prompt_payload(stdin_json: &str) -> Option<UserPromptPayload> 
 
 /// True when this prompt was injected by the harness rather than submitted by
 /// the user: the `<task-notification>` envelope Claude Code queues when a
-/// background shell / Monitor / subagent finishes.
+/// background shell / Monitor / subagent finishes, or a prompt made only of
+/// Fleet's own agent frames ([`crate::live_inject::frame_as_agent`]) — a watch
+/// firing, a schedule, another session's message. A watch that fires right
+/// after the session registered a handoff is absorbed into the same turn and
+/// fires this hook; treating it as the user taking over silently dropped the
+/// relay (chain 69ea6ccd, twice on 2026-11-25).
 ///
 /// Deliberately narrow. Anything this returns `false` for keeps the old
 /// take-over semantics (a pending handoff is dropped), so a misread here can
 /// only fail in the safe direction — an extra cancel, never a surprise relay.
+/// A prompt that mixes frames with the user's own words is still the user's.
 pub fn is_harness_injected_prompt(prompt: &str) -> bool {
-    prompt.trim_start().starts_with("<task-notification>")
+    if prompt.trim_start().starts_with("<task-notification>") {
+        return true;
+    }
+    matches!(
+        crate::live_inject::strip_agent_frames(prompt.trim()),
+        Some((_, true))
+    )
 }
 
 #[cfg(test)]
@@ -632,6 +644,23 @@ mod tests {
         assert!(is_harness_injected_prompt(
             "\n  <task-notification></task-notification>"
         ));
+    }
+
+    #[test]
+    fn fleet_agent_frame_reads_as_harness_injected() {
+        use crate::live_inject::frame_as_agent;
+        let watch = frame_as_agent("你注册的 Fleet watch `c8df917a` 触发了——等待的 1 个会话都已完成。");
+        assert!(is_harness_injected_prompt(&watch));
+        // Several queued frames drained into one prompt are still all Fleet's.
+        let two = format!("{watch}\n\n{}", frame_as_agent("schedule fired"));
+        assert!(is_harness_injected_prompt(&two));
+        // The user's own words next to a frame make it the user's turn.
+        assert!(!is_harness_injected_prompt(&format!("先别交接\n\n{watch}")));
+        // Only the head line, with no closing tail, is a typed prompt.
+        assert!(!is_harness_injected_prompt(&format!(
+            "{}hi",
+            crate::live_inject::AGENT_FRAME_HEAD
+        )));
     }
 
     #[test]
