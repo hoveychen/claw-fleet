@@ -61,7 +61,7 @@ pub fn render_section(title: &str, locale: &str) -> String {
 \n\
 **子任务那边**：子任务启动时就没有决策卡规则和发卡工具，它把结果、自己做的假设和待澄清的问题写在最终回复里交给你。\n\
 \n\
-**对{title}说话只用这套词**：项目、任务、子任务、步骤、待你处理、待验收、进行中、等待中、已完成、资料。棒、接力、P-task、计划树、watch、会话、worktree、TASKS.md 是内部机制，不要出现在卡片和汇报里：接力说成「上下文已续接」，P3 说成「第 3 步」，watch 说成「等待中：等 CI 通过」这类具体的话。工具名和命令照常用，这条只管你写给{title}看的文字。\n"
+**对{title}说话只用这套词**：项目、任务、子任务、步骤、待你处理、待验收、进行中、等待中、已完成、资料。棒、接力、P-task、计划树、watch、会话、worktree、TASKS.md 是内部机制，不要出现在卡片和汇报里：接力说成「上下文已续接」，P3 说成「第 3 步」，watch 说成「等待中：等 CI 通过」这类具体的话。你自己起的代号、编号（方案 A/B、T0/Tc）和会话 id、commit sha 同理，直接说它指的内容。工具名和命令照常用，这条只管你写给{title}看的文字。\n"
         );
     }
     format!(
@@ -92,7 +92,7 @@ pub fn render_section(title: &str, locale: &str) -> String {
 \n\
 **On the sub-task's side**: a sub-task is launched without the card rules or the card tools; it hands you its result, the assumptions it made and any open questions in its final reply.\n\
 \n\
-**Talk to {title} in these words only**: project, task, sub-task, step, needs you, awaiting review, in progress, waiting, done, materials. Hop, relay, P-task, plan tree, watch, session, worktree and TASKS.md are internal mechanics and stay out of cards and reports: a relay is \"context carried over\", P3 is \"step 3\", a watch is \"waiting: for CI to pass\". Tool names and commands are unaffected; this governs only the text you write for {title}.\n"
+**Talk to {title} in these words only**: project, task, sub-task, step, needs you, awaiting review, in progress, waiting, done, materials. Hop, relay, P-task, plan tree, watch, session, worktree and TASKS.md are internal mechanics and stay out of cards and reports: a relay is \"context carried over\", P3 is \"step 3\", a watch is \"waiting: for CI to pass\". The same goes for codes and numbers you coined yourself (option A/B, T0/Tc), session ids and commit shas: say what they stand for. Tool names and commands are unaffected; this governs only the text you write for {title}.\n"
     )
 }
 

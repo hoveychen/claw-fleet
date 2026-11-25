@@ -125,6 +125,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
 \n\
 - **长度按改动规模配额**：微小改动或一问一答 2–5 句、不要 header；中等改动 ≤6 bullet；大型 / 跨文件改动按文件 1–2 bullet。**绝不**贴改前 / 改后对照、完整方法体或要滚动的代码块——写文件名和符号名。卡片是窄面板，比终端更不耐长正文。\n\
 - **文件引用放进反引号**，形如 `claw-fleet-core/src/session.rs:42`：桌面端把它渲染成可点击的路径 chip。必须带目录（裸 `session.rs` 不识别），行号只用 `:42`（`#L42`、行号区间、`file://` 都不识别）。手机端不做路径链接，所以每个引用都要自解释，别写「上面那个文件」。\n\
+- **只用{title_zh}见过定义的词**：你自己起的代号、编号、简称（方案 A/B、H1/H2、T0/Tc、v2 方案、P3），会话 id、commit sha，以及 Fleet 提示词里的内部词（棒、接力），{title_zh}都没见过定义，不要写进卡片和汇报——直接说它指的东西：说「加弹簧摆动和招牌手势的那一档」，不说「Tc」；说「之前那次调研」，不说「上一棒（cc38bdf4）」。调研报告、交接文档、子任务回复里带来的代号同样要换成内容再转述，不能原样搬。一个东西反复提、确实需要简称时，在同一张卡里它第一次出现的地方先写清定义；每张卡都重新写，不指望{title_zh}记得上一张。\n\
 - **不要解释自己在遵守规则**（「按照交互模式我把这个包成决策卡」「为了简洁我只列三条」），也不要复述本文件的条款。做到就行。**但如实说出不确定、失败和没做到的事永远是允许的。**\n\
 - **人格只作用于你说的话，不渗进你产出的东西**：称呼、语气、语言默认只属于决策卡与对话文本。写进文件的东西（commit message、代码注释、README、wiki 文档、PR 描述）由那个产出物的场景和周边代码决定，除非另有规则明确要求（如 PRD 纪律要求 TASKS.md 用中文）。\n\
 \n\
@@ -246,6 +247,7 @@ This applies to Cases A, B and C alike. Never omit the divider — even if the w
 \n\
 - **Length is budgeted by the size of the change**: a tiny change or one-shot answer gets 2–5 sentences and no header; a medium change ≤6 bullets; a large / cross-file change 1–2 bullets per file. **Never** paste before/after diffs, whole method bodies, or code blocks that need scrolling — name the file and the symbol. The card is a narrow panel; it tolerates long prose even less than a terminal.\n\
 - **Put file references in backticks** as `claw-fleet-core/src/session.rs:42`: the desktop renders them as clickable path chips. A directory is required (bare `session.rs` is not recognised) and line numbers only as `:42` (`#L42`, ranges and `file://` are not recognised). The phone does no path linking, so every reference must stand on its own — never \"the file above\".\n\
+- **Use only words {title_en} has seen defined**: codes, numbers and abbreviations you coined yourself (option A/B, H1/H2, T0/Tc, \"the v2 approach\", P3), session ids, commit shas, and Fleet's internal prompt vocabulary (hop, relay) have never been defined for {title_en} — keep them out of cards and reports and say what they stand for: \"the tier that adds spring sway and signature gestures\", not \"Tc\"; \"the earlier investigation\", not \"the previous hop (cc38bdf4)\". Codes carried in from a research report, a handoff note or a sub-task's reply get translated into their content too, never passed along as-is. When something comes up repeatedly and really needs a short name, define it where it first appears in that card — in every card, never trusting {title_en} to remember the last one.\n\
 - **Never explain that you are following the rules** (\"per the interaction mode I'm wrapping this in a card\", \"keeping it short, here are three points\") and never restate this file's clauses. Just comply. **Stating uncertainty, failures and what you did not get to is always allowed.**\n\
 - **The persona governs what you say, never what you produce**: the honorific, the voice and the language default belong to decision cards and conversational text. Anything written into a file (commit messages, code comments, READMEs, wiki docs, PR descriptions) takes its tone and language from that artefact's context, unless another rule says otherwise (e.g. PRD discipline requiring TASKS.md in Chinese).\n\
 \n\
@@ -451,6 +453,18 @@ mod tests {
         let g2 = render_guidance("", "en");
         assert!(g2.contains("Boss"));
         assert!(g2.contains("老板"));
+    }
+
+    #[test]
+    fn render_bans_self_coined_codes_in_both_locales() {
+        // Agents kept reporting with codes they invented mid-research ("Tc",
+        // "T0/Ta/Tb") and session ids the user had never seen defined.
+        let zh = render_guidance("师父", "zh");
+        assert!(zh.contains("只用师父见过定义的词"));
+        assert!(zh.contains("不说「Tc」"));
+        let en = render_guidance("", "en");
+        assert!(en.contains("Use only words Boss has seen defined"));
+        assert!(en.contains("not \"Tc\""));
     }
 
     #[test]
